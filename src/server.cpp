@@ -8,6 +8,7 @@
 int main(int argc, _TCHAR* argv[])
 {
 	SAHosts ahosts;
+	ahosts.start();
 	return 0;
 }
 

@@ -7,9 +7,12 @@
 
 #include "targetver.h"
 
+#define _CRT_SECURE_NO_WARNINGS
+
 #include <stdio.h>
 #include <tchar.h>
 
 #include "asio.hpp"
+#include "pe_log.h"
 
 // TODO: reference additional headers your program requires here
