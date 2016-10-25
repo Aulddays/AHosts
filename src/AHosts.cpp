@@ -5,6 +5,13 @@
 #include <boost/bind.hpp>
 #include "AHosts.hpp"
 
+#if defined(_DEBUG) && defined(_MSC_VER)
+#	ifndef DBG_NEW
+#		define DBG_NEW new ( _NORMAL_BLOCK , __FILE__ , __LINE__ )
+#		define new DBG_NEW
+#	endif
+#endif  // _DEBUG
+
 boost::mt19937 AHostsRand((uint32_t)time(NULL) + _getpid());
 
 // AHosts
@@ -51,15 +58,47 @@ void AHosts::onUdpRequest(asio::ip::udp::endpoint *remote, aulddays::abuf<char> 
 		PELOG_ERROR_RETURNVOID((PLV_ERROR, "UDP listening failed.\n"));
 }
 
+int AHosts::jobComplete(AHostsJob *job)
+{
+	if (m_jobs.find(job) == m_jobs.end())
+		PELOG_ERROR_RETURN((PLV_ERROR, "Invalid job ptr.\n"), 1);
+	PELOG_LOG((PLV_TRACE, "Job complete\n"));
+	m_jobs.erase(job);
+	delete job;
+	return 0;
+}
+
 // AHostsJob
 
 AHostsJob::AHostsJob(AHosts *ahosts, asio::io_service &ioService,
 	asio::ip::udp::socket *socket, asio::ip::udp::endpoint *remote, aulddays::abuf<char> *req)
-	: m_ahosts(ahosts), m_ioService(ioService)
+	: m_ahosts(ahosts), m_ioService(ioService), m_status(0)
 {
-	m_server = new UdpServer(m_ioService);
-	m_client = new UdpClient(req, socket, remote, m_server, m_ioService);
+	m_server = new UdpServer(this, m_ioService);
+	m_client = new UdpClient(req, socket, remote, m_server, this, m_ioService);
 	m_server->setClient(m_client);
+}
+
+int AHostsJob::clientComplete(DnsClient *client)
+{
+	if (client != m_client)
+		PELOG_ERROR_RETURN((PLV_ERROR, "Invalid client ptr\n"), 1);
+	m_status |= 1;
+	PELOG_LOG((PLV_VERBOSE, "Client complete\n"));
+	if ((m_status & (1 | (1 << 1))) == (1 | (1 << 1)))	// client and server both completed
+		m_ahosts->jobComplete(this);
+	return 0;
+}
+
+int AHostsJob::serverComplete(DnsServer *server)
+{
+	if (server != m_server)
+		PELOG_ERROR_RETURN((PLV_ERROR, "Invalid server ptr\n"), 1);
+	PELOG_LOG((PLV_VERBOSE, "Server complete\n"));
+	m_status |= (1 << 1);
+	if ((m_status & (1 | (1 << 1))) == (1 | (1 << 1)))	// client and server both completed
+		m_ahosts->jobComplete(this);
+	return 0;
 }
 
 // UdpServer
@@ -102,10 +141,10 @@ void UdpServer::onReqSent(asio::ip::udp::endpoint *remote, const asio::error_cod
 	m_res.resize(4096);
 	PELOG_LOG((PLV_DEBUG, "Request sent (" PL_SIZET "), waiting server response\n", size));
 	m_socket.async_receive_from(asio::buffer(m_res, m_res.size()), *remote,
-		boost::bind(&UdpServer::onResponse, this, asio::placeholders::error, asio::placeholders::bytes_transferred));
+		boost::bind(&UdpServer::onResponse, this, remote, asio::placeholders::error, asio::placeholders::bytes_transferred));
 }
 
-void UdpServer::onResponse(const asio::error_code& error, size_t size)
+void UdpServer::onResponse(asio::ip::udp::endpoint *remote, const asio::error_code& error, size_t size)
 {
 	if (error)
 	{
@@ -117,13 +156,15 @@ void UdpServer::onResponse(const asio::error_code& error, size_t size)
 		PELOG_LOG((PLV_DEBUG, "Response from server got (" PL_SIZET ")\n", size));
 		m_res.resize(size);
 	}
+	delete remote;
 	m_client->response(m_res);
+	m_job->serverComplete(this);
 }
 
 // UdpClient
 UdpClient::UdpClient(aulddays::abuf<char> *req, asio::ip::udp::socket *socket, asio::ip::udp::endpoint *remote,
-	DnsServer *server, asio::io_service &ioService)
-	: DnsClient(server, ioService), m_req(req), m_socket(socket), m_remote(remote)
+	DnsServer *server, AHostsJob *job, asio::io_service &ioService)
+	: DnsClient(job, server, ioService), m_req(req), m_socket(socket), m_remote(remote)
 {
 	m_id = *(uint16_t *)(char *)*req;
 	int res = m_server->send(*req);
@@ -144,5 +185,5 @@ void UdpClient::onResponsed(const asio::error_code& error, size_t size)
 		PELOG_LOG((PLV_ERROR, "Send response to client failed. %s\n", error.message().c_str()));
 	else
 		PELOG_LOG((PLV_DEBUG, "Response sent to client (" PL_SIZET ")\n", size));
-	// TODO: inform job
+	m_job->clientComplete(this);
 }
