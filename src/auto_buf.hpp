@@ -175,7 +175,7 @@ public:
 	int resize(size_t new_element_count)
 	{
 		abuf_mem_check();
-		if(new_element_count > _size)
+		if (new_element_count != _size && new_element_count > 0)
 		{
 #ifdef _ABUF_DEBUG
 			uint8_t *nbuf = (uint8_t *)realloc(_inbuf, new_element_count * sizeof(T) + 8);

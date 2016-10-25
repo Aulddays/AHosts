@@ -7,7 +7,7 @@
 
 int main(int argc, _TCHAR* argv[])
 {
-	SAHosts ahosts;
+	AHosts ahosts;
 	ahosts.start();
 	return 0;
 }
