@@ -75,7 +75,8 @@ protected:
 #ifdef _ABUF_DEBUG
 	uint8_t *_inbuf;
 #endif
-	size_t _size;
+	size_t _size;	// Available size for user, in number of T's, not bytes
+	size_t _capacity;	// Actual size allocated, in T's
 private:
 	basic_abuf(const basic_abuf &);
 	basic_abuf& operator =(const basic_abuf &);
@@ -97,7 +98,7 @@ private:
 #endif
 
 public:
-	basic_abuf():_buf(NULL), _size(0)
+	basic_abuf() :_buf(NULL), _size(0), _capacity(0)
 #ifdef _ABUF_DEBUG
 		,_inbuf(NULL)
 #endif
@@ -142,6 +143,7 @@ public:
 #endif
 		}
 		_size = _buf ? element_count : 0;
+		_capacity = _size;
 		abuf_mem_check();
 	}
 
@@ -156,6 +158,7 @@ public:
 #endif
 		_buf = NULL;
 		_size = 0;
+		_capacity = 0;
 	}
 
 	/** 
@@ -175,7 +178,7 @@ public:
 	int resize(size_t new_element_count)
 	{
 		abuf_mem_check();
-		if (new_element_count != _size && new_element_count > 0)
+		if(new_element_count > _capacity)
 		{
 #ifdef _ABUF_DEBUG
 			uint8_t *nbuf = (uint8_t *)realloc(_inbuf, new_element_count * sizeof(T) + 8);
@@ -193,6 +196,16 @@ public:
 			_buf = (T *)nbuf;
 #endif
 			_size = new_element_count;
+			_capacity = new_element_count;
+		}
+		else if (new_element_count != _size)	// new_element_count <= _capacity implied
+		{
+			// do not shrink buf even if making me smaller, just change the value of size.
+			// Actual buffer size stays in capacity, in case would make me larger later
+			_size = new_element_count;
+#ifdef _ABUF_DEBUG
+			*(uint32_t*)(_inbuf + new_element_count * sizeof(T) + 4) = abuf_mem_check_dword;
+#endif
 		}
 		else if(new_element_count == 0)
 		{
@@ -209,10 +222,33 @@ public:
 		return 0;
 	}
 
+	// Usable size, in number of T's
 	size_t size() const
 	{
 		abuf_mem_check();
 		return _size;
+	}
+
+	// Actual memory allocated, in number of T's
+	size_t capacity(size_t desired_element_count) const
+	{
+		abuf_mem_check();
+		return _capacity;
+	}
+
+	// Pre-allocate some memory, not usable for now
+	int reserve(size_t desired_element_count)
+	{
+		abuf_mem_check();
+		int ret = 0;
+		if (desired_element_count > _capacity)
+		{
+			size_t osize = size();
+			ret = resize(desired_element_count);
+			resize(osize);
+			abuf_mem_check();
+		}
+		return ret;
 	}
 
 	operator T *()
@@ -266,7 +302,7 @@ template <>
     class abuf<char> : public basic_abuf<char>
 {
 public:
-	abuf(const abuf<char> &copy): basic_abuf<char>()
+	abuf(const abuf &copy): basic_abuf<char>()
 	{
 		if(copy.isNull())
 			return;
