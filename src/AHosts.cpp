@@ -95,11 +95,22 @@ void AHosts::onHeartbeat(const asio::error_code& error)
 
 AHostsJob::AHostsJob(AHosts *ahosts, asio::io_service &ioService,
 	const asio::ip::udp::socket &socket, const asio::ip::udp::endpoint &remote, const aulddays::abuf<char> &req)
-	: m_ahosts(ahosts), m_ioService(ioService), m_status(0)
+	: m_ahosts(ahosts), m_ioService(ioService), m_status(JOB_BEGIN)
 {
-	m_server = new UdpServer(this, m_ioService);
-	m_client = new UdpClient(req, socket, remote, m_server, this, m_ioService);
-	m_server->setClient(m_client);
+	//m_server = new UdpServer(this, m_ioService);
+	m_client = new UdpClient(req, socket, remote, this, m_ioService);
+	//m_server->setClient(m_client);
+}
+
+int AHostsJob::request(const aulddays::abuf<char> &req)
+{
+	m_request.reserve(std::max(req.size(), (size_t)512));
+	m_request.scopyFrom(req);
+	m_status = JOB_REQUESTING;
+	UdpServer *server = new UdpServer(this, m_client, m_ioService);
+	m_server.insert(server);
+	server->send(m_request);
+	return 0;
 }
 
 int AHostsJob::clientComplete(DnsClient *client)
@@ -186,8 +197,8 @@ void UdpServer::onResponse(asio::ip::udp::endpoint *remote, const asio::error_co
 
 // UdpClient
 UdpClient::UdpClient(const aulddays::abuf<char> &req, const asio::ip::udp::socket &socket, const asio::ip::udp::endpoint &remote,
-	DnsServer *server, AHostsJob *job, asio::io_service &ioService)
-	: DnsClient(job, server, ioService), m_req(req), m_socket(ioService, asio::ip::udp::v4()), m_remote(remote)
+	AHostsJob *job, asio::io_service &ioService)
+	: DnsClient(job, ioService), m_socket(ioService, asio::ip::udp::v4()), m_remote(remote)
 {
 	asio::error_code ec;
 	asio::socket_base::reuse_address option(true);
@@ -196,9 +207,7 @@ UdpClient::UdpClient(const aulddays::abuf<char> &req, const asio::ip::udp::socke
 	if (ec)
 		PELOG_LOG((PLV_ERROR, "Socket bind failed. %s\n", ec.message().c_str()));
 	m_id = htons(*(const uint16_t *)(const char *)req);
-	m_req.reserve(std::max(req.size(), (size_t)512));
-	m_req.scopyFrom(req);
-	int res = m_server->send(m_req);
+	int res = m_job->request(req);
 }
 
 int UdpClient::response(aulddays::abuf<char> &res)

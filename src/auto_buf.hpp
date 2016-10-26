@@ -297,6 +297,16 @@ public:
 		abuf_mem_check();
 		return 0;
 	}
+
+	void swap(basic_abuf<T> &src)
+	{
+		std::swap(_buf, src._buf);
+#ifdef _ABUF_DEBUG
+		std::swap(_inbuf, src._inbuf);
+#endif
+		std::swap(_size, src._size);
+		std::swap(_capacity, src._capacity);
+	}
 };
 
 template <typename T>

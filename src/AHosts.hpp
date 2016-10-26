@@ -8,27 +8,32 @@
 
 extern boost::mt19937 AHostsRand;
 
-class DnsServer;
 class AHostsJob;
 class DnsClient
 {
 public:
-	DnsClient(AHostsJob *job, DnsServer *server, asio::io_service &ioService)
-		: m_job(job), m_server(server), m_ioService(ioService), m_id(-1) {}
+	DnsClient(AHostsJob *job, asio::io_service &ioService)
+		: m_job(job), m_ioService(ioService), m_id(-1), m_status(CLIENT_BEGIN) {}
 	virtual ~DnsClient(){}
 	virtual int response(aulddays::abuf<char> &res) = 0;
 protected:
 	AHostsJob *m_job;
-	DnsServer *m_server;
 	asio::io_service &m_ioService;
 	uint16_t m_id;
+	enum
+	{
+		CLIENT_BEGIN,	// receiving request, only for tcp client
+		CLIENT_WAITING,		// waiting server to respond
+		CLIENT_RESPONDING,	// got server response, sending to client
+		CLIENT_RESPONDED,	// response sent. client complete
+	} m_status;
 };
 
 class DnsServer
 {
 public:
-	DnsServer(AHostsJob *job, asio::io_service &ioService)
-		: m_job(job), m_client(NULL), m_ioService(ioService) {}
+	DnsServer(AHostsJob *job, DnsClient client, asio::io_service &ioService)
+		: m_job(job), m_client(client), m_ioService(ioService), m_status(SERVER_BEGIN){}
 	virtual ~DnsServer(){}
 	void setClient(DnsClient *client){ m_client = client; }
 	virtual int send(aulddays::abuf<char> &req) = 0;
@@ -36,6 +41,13 @@ protected:
 	AHostsJob *m_job;
 	DnsClient *m_client;
 	asio::io_service &m_ioService;
+	enum
+	{
+		SERVER_BEGIN,	// waiting for request
+		SERVER_SENDING,	// sending request to recursive server
+		SERVER_WAITING,		// request sent, receiving response
+		SERVER_GOTANSWER,	// response got and sent to client, server complete
+	} m_status;
 };
 
 class AHosts;
@@ -45,15 +57,31 @@ class AHostsJob
 public:
 	AHostsJob(AHosts *ahosts, asio::io_service &ioService,
 		const asio::ip::udp::socket &socket, const asio::ip::udp::endpoint &remote, const aulddays::abuf<char> &req);
-	~AHostsJob(){ delete m_client; delete m_server; }
+	~AHostsJob()
+	{
+		delete m_client;
+		assert(m_server.size() == 0);
+		for (auto i = m_finished.begin(); i != m_finished.end(); ++i)
+			delete *i;
+		m_finished.clear();
+	}
 	int clientComplete(DnsClient *client);
 	int serverComplete(DnsServer *server);
+	int request(const aulddays::abuf<char> &req);	// called by client to send request
 private:
 	AHosts *m_ahosts;
 	asio::io_service &m_ioService;
 	DnsClient *m_client;
-	DnsServer *m_server;
-	int m_status;	// client and server complete status
+	std::set<DnsServer *> m_server;	// running servers
+	std::vector<DnsServer *> m_finished;	// completed servers move from m_server to here
+	aulddays::abuf<char> m_request;
+	enum
+	{
+		JOB_BEGIN,	// receiving request from client, only for tcp client
+		JOB_REQUESTING,	// requesting recursive servers
+		JOB_GOTANSWER,	// got answer from some server
+		JOB_RESPONDED	// sent response to client
+	} m_status;	// client and server complete status
 };
 
 class AHosts
@@ -82,12 +110,12 @@ class UdpClient : public DnsClient
 {
 public:
 	UdpClient(const aulddays::abuf<char> &req, const asio::ip::udp::socket &socket, const asio::ip::udp::endpoint &remote,
-		DnsServer *server, AHostsJob *job, asio::io_service &ioService);
+		AHostsJob *job, asio::io_service &ioService);
 	virtual ~UdpClient(){ };
 	virtual int response(aulddays::abuf<char> &res);
 	void onResponsed(const asio::error_code& error, size_t size);
 private:
-	aulddays::abuf<char> m_req;
+	//aulddays::abuf<char> m_req;
 	asio::ip::udp::socket m_socket;
 	asio::ip::udp::endpoint m_remote;
 };
