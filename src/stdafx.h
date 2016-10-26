@@ -5,10 +5,17 @@
 
 #pragma once
 
+
 #include "targetver.h"
 
 #define _CRT_SECURE_NO_WARNINGS
 
+#if defined(_DEBUG) && defined(_MSC_VER)
+#	define _CRTDBG_MAP_ALLOC
+#	include <crtdbg.h>
+#endif
+
+#include <stdlib.h>
 #include <stdio.h>
 #include <tchar.h>
 

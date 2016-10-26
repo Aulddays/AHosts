@@ -44,7 +44,7 @@ class AHostsJob
 {
 public:
 	AHostsJob(AHosts *ahosts, asio::io_service &ioService,
-		asio::ip::udp::socket *socket, asio::ip::udp::endpoint *remote, aulddays::abuf<char> *req);
+		const asio::ip::udp::socket &socket, const asio::ip::udp::endpoint &remote, const aulddays::abuf<char> &req);
 	~AHostsJob(){ delete m_client; delete m_server; }
 	int clientComplete(DnsClient *client);
 	int serverComplete(DnsServer *server);
@@ -59,34 +59,37 @@ private:
 class AHosts
 {
 public:
-	AHosts() : m_uSocket(m_ioService, asio::ip::udp::v4()){}
+	AHosts() : m_uSocket(m_ioService, asio::ip::udp::v4()), m_hbTimer(m_ioService){}
 	~AHosts(){}
 	int start();
 	int stop(){ m_ioService.stop(); return 0; }
 	int jobComplete(AHostsJob *job);
 private:
-	void onUdpRequest(asio::ip::udp::endpoint *remote, aulddays::abuf<char> *buf, const asio::error_code& error, size_t size);
+	void onUdpRequest(const asio::error_code& error, size_t size);
+	void onHeartbeat(const asio::error_code& error);
+
 	int listenUdp();
 	asio::io_service m_ioService;
 	asio::ip::udp::socket m_uSocket;
 	std::set<AHostsJob *> m_jobs;
-	//asio::ip::udp::endpoint m_uRemote;
-	//aulddays::abuf<char> m_ucRecvBuf;
-
+	asio::ip::udp::endpoint m_uRemote;
+	aulddays::abuf<char> m_ucRecvBuf;
+	asio::deadline_timer m_hbTimer;	// heartbeat timer
+	static const int HBTIMEMS = 100;	// trigger heartbeat every 0.1 sec
 };
 
 class UdpClient : public DnsClient
 {
 public:
-	UdpClient(aulddays::abuf<char> *req, asio::ip::udp::socket *socket, asio::ip::udp::endpoint *remote,
+	UdpClient(const aulddays::abuf<char> &req, const asio::ip::udp::socket &socket, const asio::ip::udp::endpoint &remote,
 		DnsServer *server, AHostsJob *job, asio::io_service &ioService);
-	virtual ~UdpClient(){ delete m_req; delete m_remote; };
+	virtual ~UdpClient(){ };
 	virtual int response(aulddays::abuf<char> &res);
 	void onResponsed(const asio::error_code& error, size_t size);
 private:
-	aulddays::abuf<char> *m_req;
-	asio::ip::udp::socket *m_socket;
-	asio::ip::udp::endpoint *m_remote;
+	aulddays::abuf<char> m_req;
+	asio::ip::udp::socket m_socket;
+	asio::ip::udp::endpoint m_remote;
 };
 
 class UdpServer : public DnsServer
