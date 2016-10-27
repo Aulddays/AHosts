@@ -74,14 +74,13 @@ int AHosts::jobComplete(AHostsJob *job)
 
 void AHosts::onHeartbeat(const asio::error_code& error)
 {
+	//PELOG_LOG((PLV_DEBUG, "Heart Beat\n"));
 	if (!error)
 	{
-		time_t now = time(NULL);
+		boost::posix_time::ptime now = boost::posix_time::microsec_clock::local_time();
 		for (auto i = m_jobs.begin(); i != m_jobs.end(); ++i)
-		{
-			//(*i)->Heartbeat(now);
-		}
-		m_hbTimer.expires_from_now(boost::posix_time::seconds(HBTIMEMS));
+			(*i)->heartBeat(now);
+		m_hbTimer.expires_from_now(boost::posix_time::milliseconds(HBTIMEMS));
 		m_hbTimer.async_wait(boost::bind(&AHosts::onHeartbeat, this, asio::placeholders::error));
 	}
 	else if (error)
@@ -107,9 +106,16 @@ int AHostsJob::request(const aulddays::abuf<char> &req)
 	m_request.reserve(std::max(req.size(), (size_t)512));
 	m_request.scopyFrom(req);
 	m_status = JOB_REQUESTING;
-	UdpServer *server = new UdpServer(this, m_ioService);
-	m_server.insert(server);
-	server->send(m_request);
+	const static asio::ip::udp::endpoint serverconf[] = {
+		asio::ip::udp::endpoint(asio::ip::address::from_string("208.67.222.222"), 53),
+		asio::ip::udp::endpoint(asio::ip::address::from_string("208.67.220.220"), 53),
+	};
+	for (size_t i = 0; i < sizeof(serverconf) / sizeof(serverconf[0]); ++i)
+	{
+		UdpServer *server = new UdpServer(this, m_ioService, serverconf[i], 20000);
+		m_server.insert(server);
+		server->send(m_request);
+	}
 	return 0;
 }
 
@@ -123,12 +129,7 @@ int AHostsJob::clientComplete(DnsClient *client)
 	PELOG_LOG((PLV_VERBOSE, "Client complete\n"));
 	if (m_server.size() == 0)	// client and server both completed
 		m_ahosts->jobComplete(this);
-	else
-	{
-		PELOG_LOG((PLV_VERBOSE, "Canceling all pending servers\n"));
-		for (auto i = m_server.begin(); i != m_server.end(); ++i)
-			;	// TODO: cancel all running servers
-	}
+	// if m_server.size() == 0, do not have to cancel servers from here 
 	return 0;
 }
 
@@ -148,11 +149,17 @@ int AHostsJob::serverComplete(DnsServer *server, aulddays::abuf<char> &response)
 		{
 			m_client->response(response);
 			m_status = JOB_GOTANSWER;
+			if (m_server.size() > 0)	// cancel other server since we've got answer
+			{
+				PELOG_LOG((PLV_VERBOSE, "Canceling all pending servers\n"));
+				for (auto i = m_server.begin(); i != m_server.end(); ++i)
+					(*i)->cancel();
+			}
 		}
 		else if (m_server.size() == 0)	// all server finished and no answer
 		{
-			m_client->cancel();
 			m_status = JOB_GOTANSWER;
+			m_client->cancel();
 		}
 	}
 	if (m_server.size() == 0 && m_status == JOB_RESPONDED)
@@ -162,9 +169,20 @@ int AHostsJob::serverComplete(DnsServer *server, aulddays::abuf<char> &response)
 	return 0;
 }
 
+int AHostsJob::heartBeat(const boost::posix_time::ptime &now)
+{
+	int ret = 0;
+	for (auto i = m_server.begin(); i != m_server.end(); ++i)
+		ret |= (*i)->heartBeat(now);
+	ret |= m_client->heartBeat(now);
+	return ret;
+}
+
+
 // UdpServer
 int UdpServer::send(aulddays::abuf<char> &req)
 {
+	m_start = boost::posix_time::microsec_clock::local_time();
 	boost::uniform_int<> randport(16385, 32767);
 	bool bindok = false;
 	for (int i = 0; i < 10; ++i)
@@ -200,7 +218,8 @@ void UdpServer::onReqSent(const asio::error_code& error, size_t size)
 {
 	if (error)
 	{
-		PELOG_LOG((PLV_ERROR, "Send request to server failed. %s\n", error.message().c_str()));
+		if (!m_cancel)
+			PELOG_LOG((PLV_ERROR, "Send request to server failed. %s\n", error.message().c_str()));
 		m_status = SERVER_GOTANSWER;
 		m_res.resize(0);
 		m_job->serverComplete(this, m_res);
@@ -217,7 +236,8 @@ void UdpServer::onResponse(const asio::error_code& error, size_t size)
 {
 	if (error)
 	{
-		PELOG_LOG((PLV_ERROR, "Recv response from server failed. %s\n", error.message().c_str()));
+		if (!m_cancel)
+			PELOG_LOG((PLV_ERROR, "Recv response from server failed. %s\n", error.message().c_str()));
 		m_res.resize(0);
 	}
 	else
@@ -229,10 +249,40 @@ void UdpServer::onResponse(const asio::error_code& error, size_t size)
 	m_job->serverComplete(this, m_res);
 }
 
+int UdpServer::cancel()
+{
+	PELOG_LOG((PLV_VERBOSE, "Server cenceling.\n"));
+	m_cancel = true;
+	if (m_status < SERVER_SENDING)
+	{
+		m_status = SERVER_GOTANSWER;
+		m_res.resize(0);
+		m_job->serverComplete(this, m_res);
+	}
+	else if (m_status == SERVER_SENDING || m_status == SERVER_WAITING)
+		m_socket.close();
+	return 0;
+}
+
+int UdpServer::heartBeat(const boost::posix_time::ptime &now)
+{
+	if (m_status >= SERVER_SENDING && m_status <= SERVER_WAITING)
+	{
+		int64_t passed = (now - m_start).total_milliseconds();
+		if (passed > m_timeout || passed < (0 - (signed int)m_timeout))
+		{
+			PELOG_LOG((PLV_INFO, "Server timed-out %d:%d.\n", int(passed), (int)m_timeout));
+			cancel();
+		}
+	}
+	return 0;
+}
+
 // UdpClient
 UdpClient::UdpClient(const aulddays::abuf<char> &req, const asio::ip::udp::socket &socket, const asio::ip::udp::endpoint &remote,
 	AHostsJob *job, asio::io_service &ioService)
-	: DnsClient(job, ioService), m_socket(ioService, asio::ip::udp::v4()), m_remote(remote)
+	: DnsClient(job, ioService, 5000), m_socket(ioService, asio::ip::udp::v4()), m_remote(remote),
+	m_start(boost::posix_time::min_date_time), m_cancel(false)
 {
 	asio::error_code ec;
 	asio::socket_base::reuse_address option(true);
@@ -249,6 +299,7 @@ int UdpClient::response(aulddays::abuf<char> &res)
 {
 	if (m_status != CLIENT_WAITING)
 		PELOG_ERROR_RETURN((PLV_ERROR, "Client in invalid status %d\n", m_status), 1);
+	m_start = boost::posix_time::microsec_clock::local_time();
 	m_status = CLIENT_RESPONDING;
 	PELOG_LOG((PLV_DEBUG, "To send to client %s:%d on %d. size " PL_SIZET "\n",
 		m_remote.address().to_string().c_str(), (int)m_remote.port(), (int)m_socket.local_endpoint().port(), res.size()));
@@ -260,7 +311,8 @@ int UdpClient::response(aulddays::abuf<char> &res)
 void UdpClient::onResponsed(const asio::error_code& error, size_t size)
 {
 	if (error)
-		PELOG_LOG((PLV_ERROR, "Send response to client failed. %s\n", error.message().c_str()));
+		if (!m_cancel)
+			PELOG_LOG((PLV_ERROR, "Send response to client failed. %s\n", error.message().c_str()));
 	else
 		PELOG_LOG((PLV_DEBUG, "Response sent to client (" PL_SIZET ")\n", size));
 	asio::error_code ec;
@@ -275,6 +327,7 @@ int UdpClient::cancel()
 {
 	PELOG_LOG((PLV_VERBOSE, "Cancel client\n"));
 	asio::error_code ec;
+	m_cancel = true;
 	if (m_status <= CLIENT_WAITING)
 	{
 		// do not respond. client would natually timeout
@@ -294,3 +347,18 @@ int UdpClient::cancel()
 	}
 	return 0;
 }
+
+int UdpClient::heartBeat(const boost::posix_time::ptime &now)
+{
+	if (m_status == CLIENT_RESPONDING)
+	{
+		int64_t passed = (now - m_start).total_milliseconds();
+		if (passed > m_timeout || passed < (0 - (signed int)m_timeout))
+		{
+			PELOG_LOG((PLV_INFO, "Client timed-out %d:%d.\n", int(passed), (int)m_timeout));
+			cancel();
+		}
+	}
+	return 0;
+}
+
