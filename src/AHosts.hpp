@@ -16,6 +16,7 @@ public:
 		: m_job(job), m_ioService(ioService), m_id(-1), m_status(CLIENT_BEGIN) {}
 	virtual ~DnsClient(){}
 	virtual int response(aulddays::abuf<char> &res) = 0;
+	virtual int cancel() = 0;	// no response to client
 protected:
 	AHostsJob *m_job;
 	asio::io_service &m_ioService;
@@ -32,14 +33,14 @@ protected:
 class DnsServer
 {
 public:
-	DnsServer(AHostsJob *job, DnsClient client, asio::io_service &ioService)
-		: m_job(job), m_client(client), m_ioService(ioService), m_status(SERVER_BEGIN){}
+	DnsServer(AHostsJob *job, asio::io_service &ioService)
+		: m_job(job), m_ioService(ioService), m_status(SERVER_BEGIN){}
 	virtual ~DnsServer(){}
-	void setClient(DnsClient *client){ m_client = client; }
+	//void setClient(DnsClient *client){ m_client = client; }
 	virtual int send(aulddays::abuf<char> &req) = 0;
 protected:
 	AHostsJob *m_job;
-	DnsClient *m_client;
+	//DnsClient *m_client;
 	asio::io_service &m_ioService;
 	enum
 	{
@@ -66,7 +67,7 @@ public:
 		m_finished.clear();
 	}
 	int clientComplete(DnsClient *client);
-	int serverComplete(DnsServer *server);
+	int serverComplete(DnsServer *server, aulddays::abuf<char> &response);
 	int request(const aulddays::abuf<char> &req);	// called by client to send request
 private:
 	AHosts *m_ahosts;
@@ -114,6 +115,7 @@ public:
 	virtual ~UdpClient(){ };
 	virtual int response(aulddays::abuf<char> &res);
 	void onResponsed(const asio::error_code& error, size_t size);
+	virtual int cancel();	// no response to client
 private:
 	//aulddays::abuf<char> m_req;
 	asio::ip::udp::socket m_socket;
@@ -124,14 +126,14 @@ class UdpServer : public DnsServer
 {
 public:
 	UdpServer(AHostsJob *job, asio::io_service &ioService)
-		: DnsServer(job, ioService), m_socket(m_ioService, asio::ip::udp::v4()){}
+		: DnsServer(job, ioService), m_socket(m_ioService, asio::ip::udp::v4()),
+		m_remote(asio::ip::address::from_string("208.67.222.222"), 53){}
 	virtual ~UdpServer(){}
 	virtual int send(aulddays::abuf<char> &req);
 private:
-	void onReqSent(asio::ip::udp::endpoint *remote, const asio::error_code& error, size_t size);
-	void onResponse(asio::ip::udp::endpoint *remote, const asio::error_code& error, size_t size);
-	asio::ip::udp::endpoint m_remote;
+	void onReqSent(const asio::error_code& error, size_t size);
+	void onResponse(const asio::error_code& error, size_t size);
 	asio::ip::udp::socket m_socket;
+	asio::ip::udp::endpoint m_remote;
 	aulddays::abuf<char> m_res;
 };
-

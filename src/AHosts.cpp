@@ -107,7 +107,7 @@ int AHostsJob::request(const aulddays::abuf<char> &req)
 	m_request.reserve(std::max(req.size(), (size_t)512));
 	m_request.scopyFrom(req);
 	m_status = JOB_REQUESTING;
-	UdpServer *server = new UdpServer(this, m_client, m_ioService);
+	UdpServer *server = new UdpServer(this, m_ioService);
 	m_server.insert(server);
 	server->send(m_request);
 	return 0;
@@ -117,21 +117,48 @@ int AHostsJob::clientComplete(DnsClient *client)
 {
 	if (client != m_client)
 		PELOG_ERROR_RETURN((PLV_ERROR, "Invalid client ptr\n"), 1);
-	m_status |= 1;
+	if (m_status != JOB_GOTANSWER)
+		PELOG_ERROR_RETURN((PLV_ERROR, "Invalid job status %d\n", m_status), 1);
+	m_status = JOB_RESPONDED;
 	PELOG_LOG((PLV_VERBOSE, "Client complete\n"));
-	if ((m_status & (1 | (1 << 1))) == (1 | (1 << 1)))	// client and server both completed
+	if (m_server.size() == 0)	// client and server both completed
 		m_ahosts->jobComplete(this);
+	else
+	{
+		PELOG_LOG((PLV_VERBOSE, "Canceling all pending servers\n"));
+		for (auto i = m_server.begin(); i != m_server.end(); ++i)
+			;	// TODO: cancel all running servers
+	}
 	return 0;
 }
 
-int AHostsJob::serverComplete(DnsServer *server)
+int AHostsJob::serverComplete(DnsServer *server, aulddays::abuf<char> &response)
 {
-	if (server != m_server)
+	// remove server
+	auto iserver = m_server.find(server);
+	if (iserver == m_server.end())
 		PELOG_ERROR_RETURN((PLV_ERROR, "Invalid server ptr\n"), 1);
 	PELOG_LOG((PLV_VERBOSE, "Server complete\n"));
-	m_status |= (1 << 1);
-	if ((m_status & (1 | (1 << 1))) == (1 | (1 << 1)))	// client and server both completed
+	m_server.erase(iserver);
+	m_finished.push_back(server);
+	// deal with the response
+	if (m_status < JOB_GOTANSWER)
+	{
+		if (response.size() > 0)
+		{
+			m_client->response(response);
+			m_status = JOB_GOTANSWER;
+		}
+		else if (m_server.size() == 0)	// all server finished and no answer
+		{
+			m_client->cancel();
+			m_status = JOB_GOTANSWER;
+		}
+	}
+	if (m_server.size() == 0 && m_status == JOB_RESPONDED)
+	{
 		m_ahosts->jobComplete(this);
+	}
 	return 0;
 }
 
@@ -154,31 +181,39 @@ int UdpServer::send(aulddays::abuf<char> &req)
 		}
 	}
 	if (!bindok)
-		PELOG_ERROR_RETURN((PLV_ERROR, "Failed to bind when sending recursive request\n"), 1);
-	asio::ip::udp::endpoint *remote =
-		new asio::ip::udp::endpoint(asio::ip::address::from_string("208.67.222.222"), 53);
+	{
+		PELOG_LOG((PLV_ERROR, "Failed to bind when sending recursive request\n"));
+		m_status = SERVER_GOTANSWER;
+		m_res.resize(0);
+		m_job->serverComplete(this, m_res);
+		return 1;
+	}
 	PELOG_LOG((PLV_DEBUG, "To send to server %s:%d on %d. size " PL_SIZET "\n",
-		remote->address().to_string().c_str(), (int)remote->port(), (int)m_socket.local_endpoint().port(), req.size()));
-	m_socket.async_send_to(asio::buffer(req, req.size()), *remote,
-		boost::bind(&UdpServer::onReqSent, this, remote, asio::placeholders::error, asio::placeholders::bytes_transferred));
+		m_remote.address().to_string().c_str(), (int)m_remote.port(), (int)m_socket.local_endpoint().port(), req.size()));
+	m_status = SERVER_SENDING;
+	m_socket.async_send_to(asio::buffer(req, req.size()), m_remote,
+		boost::bind(&UdpServer::onReqSent, this, asio::placeholders::error, asio::placeholders::bytes_transferred));
 	return 0;
 }
 
-void UdpServer::onReqSent(asio::ip::udp::endpoint *remote, const asio::error_code& error, size_t size)
+void UdpServer::onReqSent(const asio::error_code& error, size_t size)
 {
 	if (error)
 	{
 		PELOG_LOG((PLV_ERROR, "Send request to server failed. %s\n", error.message().c_str()));
-		// TODO: inform job
+		m_status = SERVER_GOTANSWER;
+		m_res.resize(0);
+		m_job->serverComplete(this, m_res);
 		return;
 	}
 	m_res.resize(4096);
 	PELOG_LOG((PLV_DEBUG, "Request sent (" PL_SIZET "), waiting server response\n", size));
-	m_socket.async_receive_from(asio::buffer(m_res, m_res.size()), *remote,
-		boost::bind(&UdpServer::onResponse, this, remote, asio::placeholders::error, asio::placeholders::bytes_transferred));
+	m_status = SERVER_WAITING;
+	m_socket.async_receive_from(asio::buffer(m_res, m_res.size()), m_remote,
+		boost::bind(&UdpServer::onResponse, this, asio::placeholders::error, asio::placeholders::bytes_transferred));
 }
 
-void UdpServer::onResponse(asio::ip::udp::endpoint *remote, const asio::error_code& error, size_t size)
+void UdpServer::onResponse(const asio::error_code& error, size_t size)
 {
 	if (error)
 	{
@@ -190,9 +225,8 @@ void UdpServer::onResponse(asio::ip::udp::endpoint *remote, const asio::error_co
 		PELOG_LOG((PLV_DEBUG, "Response from server got (" PL_SIZET ")\n", size));
 		m_res.resize(size);
 	}
-	delete remote;
-	m_client->response(m_res);
-	m_job->serverComplete(this);
+	m_status = SERVER_GOTANSWER;
+	m_job->serverComplete(this, m_res);
 }
 
 // UdpClient
@@ -208,10 +242,14 @@ UdpClient::UdpClient(const aulddays::abuf<char> &req, const asio::ip::udp::socke
 		PELOG_LOG((PLV_ERROR, "Socket bind failed. %s\n", ec.message().c_str()));
 	m_id = htons(*(const uint16_t *)(const char *)req);
 	int res = m_job->request(req);
+	m_status = CLIENT_WAITING;
 }
 
 int UdpClient::response(aulddays::abuf<char> &res)
 {
+	if (m_status != CLIENT_WAITING)
+		PELOG_ERROR_RETURN((PLV_ERROR, "Client in invalid status %d\n", m_status), 1);
+	m_status = CLIENT_RESPONDING;
 	PELOG_LOG((PLV_DEBUG, "To send to client %s:%d on %d. size " PL_SIZET "\n",
 		m_remote.address().to_string().c_str(), (int)m_remote.port(), (int)m_socket.local_endpoint().port(), res.size()));
 	m_socket.async_send_to(asio::buffer(res, res.size()), m_remote,
@@ -225,5 +263,34 @@ void UdpClient::onResponsed(const asio::error_code& error, size_t size)
 		PELOG_LOG((PLV_ERROR, "Send response to client failed. %s\n", error.message().c_str()));
 	else
 		PELOG_LOG((PLV_DEBUG, "Response sent to client (" PL_SIZET ")\n", size));
+	asio::error_code ec;
+	m_socket.close(ec);
+	if (m_status != CLIENT_RESPONDING)
+		PELOG_ERROR_RETURNVOID((PLV_ERROR, "Client in invalid status %d\n", m_status));
+	m_status = CLIENT_RESPONDED;
 	m_job->clientComplete(this);
+}
+
+int UdpClient::cancel()
+{
+	PELOG_LOG((PLV_VERBOSE, "Cancel client\n"));
+	asio::error_code ec;
+	if (m_status <= CLIENT_WAITING)
+	{
+		// do not respond. client would natually timeout
+		m_status = CLIENT_RESPONDED;
+		m_socket.close(ec);
+		m_job->clientComplete(this);
+	}
+	else if (m_status == CLIENT_RESPONDING)
+	{
+		m_socket.close(ec);	// cancel() may not work on some system, so just close
+	}
+	else
+	{
+		assert(m_status == CLIENT_RESPONDED);
+		PELOG_LOG((PLV_ERROR, "Trying to cancel a completed client\n"));
+		return 1;
+	}
+	return 0;
 }
