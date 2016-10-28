@@ -149,6 +149,7 @@ private:
 	asio::ip::udp::socket m_socket;
 	asio::ip::udp::endpoint m_remote;
 	aulddays::abuf<char> m_res;
+	aulddays::abuf<char> m_req;
 	boost::posix_time::ptime m_start;
 	bool m_cancel;
 };

@@ -76,6 +76,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="src\AHostsConf.cpp" />
     <ClCompile Include="src\AHosts.cpp" />
     <ClCompile Include="src\pe_log.cpp" />
     <ClCompile Include="src\server.cpp" />
@@ -85,6 +86,7 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\AHostsConf.h" />
     <ClInclude Include="src\AHosts.hpp" />
     <ClInclude Include="src\asio.hpp" />
     <ClInclude Include="src\auto_buf.hpp" />

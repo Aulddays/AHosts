@@ -183,6 +183,7 @@ int AHostsJob::heartBeat(const boost::posix_time::ptime &now)
 int UdpServer::send(aulddays::abuf<char> &req)
 {
 	m_start = boost::posix_time::microsec_clock::local_time();
+	// look for an available local port
 	boost::uniform_int<> randport(16385, 32767);
 	bool bindok = false;
 	for (int i = 0; i < 10; ++i)
@@ -206,10 +207,15 @@ int UdpServer::send(aulddays::abuf<char> &req)
 		m_job->serverComplete(this, m_res);
 		return 1;
 	}
-	PELOG_LOG((PLV_DEBUG, "To send to server %s:%d on %d. size " PL_SIZET "\n",
-		m_remote.address().to_string().c_str(), (int)m_remote.port(), (int)m_socket.local_endpoint().port(), req.size()));
+	m_req.scopyFrom(req);
+	// assign a new id to request
+	boost::uniform_int<> randid(1024, uint16_t(-1) - 1);
+	m_id = randid(AHostsRand);
+	*(uint16_t *)(char *)m_req = htons(m_id);
+	PELOG_LOG((PLV_DEBUG, "To send to server %s:%d on %d. id(%d) size(" PL_SIZET ")\n",
+		m_remote.address().to_string().c_str(), (int)m_remote.port(), (int)m_socket.local_endpoint().port(), m_id, req.size()));
 	m_status = SERVER_SENDING;
-	m_socket.async_send_to(asio::buffer(req, req.size()), m_remote,
+	m_socket.async_send_to(asio::buffer(m_req, m_req.size()), m_remote,
 		boost::bind(&UdpServer::onReqSent, this, asio::placeholders::error, asio::placeholders::bytes_transferred));
 	return 0;
 }
@@ -240,9 +246,15 @@ void UdpServer::onResponse(const asio::error_code& error, size_t size)
 			PELOG_LOG((PLV_ERROR, "Recv response from server failed. %s\n", error.message().c_str()));
 		m_res.resize(0);
 	}
+	else if (m_id != ntohs(*(const uint16_t *)(const char *)m_res))
+	{
+		PELOG_LOG((PLV_ERROR, "Invalid ID from server. expect %d got %d size(" PL_SIZET ")\n",
+			(int)m_id, (int)ntohs(*(const uint16_t *)(const char *)m_res), size));
+		m_res.resize(0);
+	}
 	else
 	{
-		PELOG_LOG((PLV_DEBUG, "Response from server got (" PL_SIZET ")\n", size));
+		PELOG_LOG((PLV_DEBUG, "Response from server got id(%d), size(" PL_SIZET ")\n", (int)m_id, size));
 		m_res.resize(size);
 	}
 	m_status = SERVER_GOTANSWER;
@@ -290,7 +302,7 @@ UdpClient::UdpClient(const aulddays::abuf<char> &req, const asio::ip::udp::socke
 	m_socket.bind(asio::ip::udp::endpoint(socket.local_endpoint()), ec);
 	if (ec)
 		PELOG_LOG((PLV_ERROR, "Socket bind failed. %s\n", ec.message().c_str()));
-	m_id = htons(*(const uint16_t *)(const char *)req);
+	m_id = ntohs(*(const uint16_t *)(const char *)req);
 	int res = m_job->request(req);
 	m_status = CLIENT_WAITING;
 }
@@ -299,6 +311,8 @@ int UdpClient::response(aulddays::abuf<char> &res)
 {
 	if (m_status != CLIENT_WAITING)
 		PELOG_ERROR_RETURN((PLV_ERROR, "Client in invalid status %d\n", m_status), 1);
+	// write back original id
+	*(uint16_t *)(char *)res = htons(m_id);
 	m_start = boost::posix_time::microsec_clock::local_time();
 	m_status = CLIENT_RESPONDING;
 	PELOG_LOG((PLV_DEBUG, "To send to client %s:%d on %d. size " PL_SIZET "\n",
