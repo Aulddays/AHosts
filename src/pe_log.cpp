@@ -64,6 +64,7 @@ static const char *pelog_levelDesc[] =
 	"VRB",
 	"TRC",
 	"INF",
+	"WRN",
 	"ERR",
 };
 BOOST_STATIC_ASSERT(sizeof(pelog_levelDesc) / sizeof(pelog_levelDesc[0]) == PLV_MAXLEVEL);

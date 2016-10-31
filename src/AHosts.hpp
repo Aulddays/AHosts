@@ -5,6 +5,7 @@
 #include <set>
 #include "asio.hpp"
 #include "auto_buf.hpp"
+#include "AHostsConf.hpp"
 
 extern boost::mt19937 AHostsRand;
 
@@ -101,15 +102,22 @@ public:
 	int stop(){ m_ioService.stop(); return 0; }
 	int jobComplete(AHostsJob *job);
 private:
+	int listenUdp();
 	void onUdpRequest(const asio::error_code& error, size_t size);
+
 	void onHeartbeat(const asio::error_code& error);
 
-	int listenUdp();
+	AHostsConf m_conf;
+
 	asio::io_service m_ioService;
-	asio::ip::udp::socket m_uSocket;
 	std::set<AHostsJob *> m_jobs;
+
+	// udp stuff
+	asio::ip::udp::socket m_uSocket;
 	asio::ip::udp::endpoint m_uRemote;
 	aulddays::abuf<char> m_ucRecvBuf;
+
+	// timer to handle timeouts
 	asio::deadline_timer m_hbTimer;	// heartbeat timer
 	static const int HBTIMEMS = 100;	// trigger heartbeat every 0.1 sec
 };

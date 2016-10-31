@@ -17,9 +17,11 @@
 
 #include <stdlib.h>
 #include <stdio.h>
-#include <tchar.h>
+#include <string.h>
 
+#include "protocol.h"
 #include "asio.hpp"
+#include "auto_buf.hpp"
 #include "pe_log.h"
 
 // TODO: reference additional headers your program requires here

@@ -263,7 +263,19 @@ public:
 		return _buf;
 	}
 
-//  operator bool() const
+	T *buf()
+	{
+		abuf_mem_check();
+		return _buf;
+	}
+
+	const T *buf() const
+	{
+		abuf_mem_check();
+		return _buf;
+	}
+
+	//  operator bool() const
 //  {
 //  	return _size != 0;
 //  }

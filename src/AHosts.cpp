@@ -26,6 +26,10 @@ boost::mt19937 AHostsRand((uint32_t)time(NULL) + _getpid());
 
 int AHosts::start()
 {
+	// load conf
+	if (int res = m_conf.load())
+		PELOG_ERROR_RETURN((PLV_ERROR, "Load conf failed.\n"), res);
+
 	// start receive
 	asio::error_code ec;
 	asio::socket_base::reuse_address option(true);
@@ -44,7 +48,7 @@ int AHosts::start()
 int AHosts::listenUdp()
 {
 	m_uRemote = asio::ip::udp::endpoint();	// clear remote
-	m_ucRecvBuf.resize(4096);
+	m_ucRecvBuf.resize(520);
 	m_uSocket.async_receive_from(asio::buffer(m_ucRecvBuf, m_ucRecvBuf.size()), m_uRemote,
 		boost::bind(&AHosts::onUdpRequest, this, asio::placeholders::error, asio::placeholders::bytes_transferred));
 	return 0;
@@ -231,7 +235,7 @@ void UdpServer::onReqSent(const asio::error_code& error, size_t size)
 		m_job->serverComplete(this, m_res);
 		return;
 	}
-	m_res.resize(4096);
+	m_res.resize(520);
 	PELOG_LOG((PLV_DEBUG, "Request sent (" PL_SIZET "), waiting server response\n", size));
 	m_status = SERVER_WAITING;
 	m_socket.async_receive_from(asio::buffer(m_res, m_res.size()), m_remote,
