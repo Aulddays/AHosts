@@ -1,10 +1,11 @@
 #pragma once
 #include "auto_buf.hpp"
+#include "AHostsConf.hpp"
 
 class AHostsHandler
 {
 public:
-	AHostsHandler(){};
+	AHostsHandler(const AHostsConf *conf): m_conf(conf){};
 	~AHostsHandler(){};
 
 	// return: 0: success and recursive request is required
@@ -16,6 +17,7 @@ public:
 	int processResponse(aulddays::abuf<char> &res);
 
 private:
+	const AHostsConf *m_conf;
 	aulddays::abuf<char> m_oriName;	// original name requested
 	size_t m_appendNum;	// number of records to be inserted
 	aulddays::abuf<char> m_append;	// answer record(s) to be inserted
