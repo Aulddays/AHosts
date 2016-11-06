@@ -33,6 +33,12 @@
     <ClCompile Include="src\AHostsHandler.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\protocol.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ah_memmem.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\asio.hpp">
@@ -53,13 +59,16 @@
     <ClInclude Include="src\pe_log.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="src\protocol.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="src\AHostsConf.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\AHostsHandler.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\protocol.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ah_memmem.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

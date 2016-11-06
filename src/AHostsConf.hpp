@@ -2,7 +2,7 @@
 // Manages configuration
 
 #include <map>
-#include "protocol.h"
+#include "protocol.hpp"
 
 struct AHostsConf
 {

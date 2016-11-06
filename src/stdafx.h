@@ -19,9 +19,10 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "protocol.h"
 #include "asio.hpp"
 #include "auto_buf.hpp"
+using namespace aulddays;
 #include "pe_log.h"
+//#include "protocol.hpp"
 
 // TODO: reference additional headers your program requires here
