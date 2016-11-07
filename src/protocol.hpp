@@ -14,6 +14,7 @@ enum ResourceType
 	RT_MX = 15,
 	RT_AAAA = 28,
 	RT_SRV = 33,
+	RT_OPT = 41,
 	RT_ANY = 255,
 };
 

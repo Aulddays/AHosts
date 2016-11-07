@@ -239,19 +239,31 @@ void UdpServer::onReqSent(const asio::error_code& error, size_t size)
 		m_job->serverComplete(this, m_res);
 		return;
 	}
-	m_res.resize(520);
+	m_res.resize(0);
 	PELOG_LOG((PLV_DEBUG, "Request sent (" PL_SIZET "), waiting server response\n", size));
 	m_status = SERVER_WAITING;
-	m_socket.async_receive_from(asio::buffer(m_res, m_res.size()), m_remote,
+	// since we do not know the response size yet, we just peek with empty buffer at first to get the size
+	m_socket.async_receive_from(asio::buffer(m_res, 0), m_remote, MSG_PEEK,
 		boost::bind(&UdpServer::onResponse, this, asio::placeholders::error, asio::placeholders::bytes_transferred));
 }
 
 void UdpServer::onResponse(const asio::error_code& error, size_t size)
 {
+	if (error && !m_cancel && m_res.size() == 0 && error.value() == ERROR_MORE_DATA)	// peek result
+	{
+		m_res.resize(m_socket.available());
+		PELOG_LOG((PLV_DEBUG, "Response size from server " PL_SIZET "\n", m_res.size()));
+		m_socket.async_receive_from(asio::buffer(m_res, m_res.size()), m_remote,
+			boost::bind(&UdpServer::onResponse, this, asio::placeholders::error, asio::placeholders::bytes_transferred));
+		return;
+	}
 	if (error)
 	{
 		if (!m_cancel)
-			PELOG_LOG((PLV_ERROR, "Recv response from server failed. %s\n", error.message().c_str()));
+		{
+			if (m_res.size() == 0)	// The peek was performed
+			PELOG_LOG((PLV_ERROR, "Recv response from server failed. %d:%s\n", error.value(), error.message().c_str()));
+		}
 		m_res.resize(0);
 	}
 	else if (m_id != ntohs(*(const uint16_t *)(const char *)m_res))

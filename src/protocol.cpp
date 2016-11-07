@@ -74,10 +74,11 @@ const char *type2name(uint16_t type)
 	static const std::map<uint16_t, std::string> typemap = boost::assign::map_list_of
 		(RT_A, "A") (RT_NS, "NS") (RT_CNAME, "CNAME") (RT_SOA, "SOA")
 		(RT_WKS, "WKS") (RT_PTR, "PTR") (RT_MX, "MX") (RT_AAAA, "AAAA")
-		(RT_SRV, "SRV") (RT_ANY, "ANY");
+		(RT_SRV, "SRV") (RT_ANY, "ANY") (RT_OPT, "OPT_PSEUDO");
 	auto itype = typemap.find(type);
 	if (itype != typemap.end())
 		return itype->second.c_str();
+	PELOG_LOG((PLV_VERBOSE, "Unknown type %d\n", (int)type));
 	return "UKN";
 }
 
@@ -149,14 +150,21 @@ void dump_packet(const aulddays::abuf<char> &pkt)
 				pos += 2;
 				uint16_t rclass = ntohs(*(const uint16_t *)pos);
 				pos += 2;
+				const unsigned char *pttl = pos;	// for opt extended RCODE and flags
 				uint32_t ttl = ntohl(*(const uint32_t *)pos);
 				pos += 4;
 				uint16_t rlen = ntohs(*(const uint16_t *)pos);
 				pos += 2;
 				if ((const char *)pos - pkt + rlen > (int)pkt.size())
 					PELOG_ERROR_RETURNVOID((PLV_ERROR, "Incomplete rdata\n"));
-				fprintf(stderr, "  (%d)%s\t%d\t%s\t%s\t", nameptr, namebuf.buf(), ttl,
-					class2name(rclass), type2name(rtype));
+				if (rtype == RT_OPT)
+				{
+					fprintf(stderr, "  %s\tudp:%d, ERCODE:%d, VERSION:%d, DO:%d\t", type2name(rtype), (int)rclass,
+						(int)*pttl, (int)pttl[1], (int)(pttl[2] >> 7));
+				}
+				else
+					fprintf(stderr, "  (%d)%s\t%d\t%s\t%s\t", nameptr, namebuf.buf(), ttl,
+						class2name(rclass), type2name(rtype));
 				int res = dump_rdata(pkt, (const char *)pos, rtype, rlen);
 				fprintf(stderr, "\n");
 				if (res)
@@ -176,17 +184,21 @@ enum RdataFields	// basic fields
 	RDATA_IP,
 	RDATA_IPV6,
 	RDATA_DUMPHEX,
+	RDATA_UNKNOWN,
 };
 // RDATA field list for each type
 static const std::map<uint16_t, std::vector<RdataFields> > rdfmt = boost::assign::map_list_of
 	(RT_CNAME, boost::assign::list_of(RDATA_NAME))
+	(RT_NS, boost::assign::list_of(RDATA_NAME))
+	(RT_PTR, boost::assign::list_of(RDATA_NAME))
 	(RT_A, boost::assign::list_of(RDATA_IP))
 	(RT_SOA, boost::assign::list_of(RDATA_NAME)(RDATA_NAME)(RDATA_UINT32)(RDATA_UINT32)(RDATA_UINT32)(RDATA_UINT32)(RDATA_UINT32))
+	(RT_OPT, boost::assign::list_of(RDATA_DUMPHEX))
 	(RT_MX, boost::assign::list_of(RDATA_UINT16)(RDATA_NAME));
 // For all non-common types, just treat them as raw bytes.
 // Actually only types with RDATA_NAME fields must be taken special care of (since they may be compressed)
 // Those without a RDATA_NAME that are in rdfmt are only for prettier dump
-static const std::vector<RdataFields> hexdump = boost::assign::list_of(RDATA_DUMPHEX);
+static const std::vector<RdataFields> hexdump = boost::assign::list_of(RDATA_UNKNOWN);
 
 static int dump_rdata(const char *begin, const char *str, uint16_t rtype, int len)
 {
@@ -236,7 +248,14 @@ static int dump_rdata(const char *begin, const char *str, uint16_t rtype, int le
 			break;
 		}
 		default:
-			PELOG_ERROR_RETURN((PLV_ERROR, "Not supported.\n"), -1);
+		{
+			for (int i = 0; i < len - (pos - str); ++i)
+				fprintf(stderr, "\\%02X", (int)(unsigned char)pos[i]);
+			pos += len - (pos - str);
+			if (*fld != RDATA_DUMPHEX)
+				PELOG_ERROR_RETURN((PLV_ERROR, "Not supported.\n"), -1);
+			break;
+		}
 		}
 	}
 	if (pos - str != len)
