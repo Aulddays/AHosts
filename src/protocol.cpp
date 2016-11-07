@@ -73,7 +73,7 @@ const char *type2name(uint16_t type)
 {
 	static const std::map<uint16_t, std::string> typemap = boost::assign::map_list_of
 		(RT_A, "A") (RT_NS, "NS") (RT_CNAME, "CNAME") (RT_SOA, "SOA")
-		(RT_WKS, "WKS") (RT_PTR, "PTR") (RT_MX, "MX") (RT_AAAA, "AAAA")
+		(RT_WKS, "WKS") (RT_PTR, "PTR") (RT_MX, "MX") (RT_TXT, "TXT") (RT_AAAA, "AAAA")
 		(RT_SRV, "SRV") (RT_ANY, "ANY") (RT_OPT, "OPT_PSEUDO");
 	auto itype = typemap.find(type);
 	if (itype != typemap.end())
@@ -92,7 +92,7 @@ const char *type2name(uint16_t type)
 // |                    ARCOUNT                    |
 // +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 
-static int dump_rdata(const char *begin, const char *pos, uint16_t rtype, int len);
+static int dump_rdata(const char *begin, const char *pos, uint16_t rtype, int len, bool ptr = true);
 void dump_packet(const aulddays::abuf<char> &pkt)
 {
 	const unsigned char *pos = (const unsigned char *)pkt.buf();
@@ -179,10 +179,13 @@ void dump_packet(const aulddays::abuf<char> &pkt)
 enum RdataFields	// basic fields
 {
 	RDATA_NAME,
+	RDATA_RNAME,		// same as RDATA_NAME but no compress (no pointer)
 	RDATA_UINT32,
 	RDATA_UINT16,
 	RDATA_IP,
 	RDATA_IPV6,
+	RDATA_STRING,
+	RDATA_TXT,
 	RDATA_DUMPHEX,
 	RDATA_UNKNOWN,
 };
@@ -191,16 +194,19 @@ static const std::map<uint16_t, std::vector<RdataFields> > rdfmt = boost::assign
 	(RT_CNAME, boost::assign::list_of(RDATA_NAME))
 	(RT_NS, boost::assign::list_of(RDATA_NAME))
 	(RT_PTR, boost::assign::list_of(RDATA_NAME))
+	(RT_MX, boost::assign::list_of(RDATA_UINT16)(RDATA_NAME))
+	(RT_TXT, boost::assign::list_of(RDATA_TXT))
 	(RT_A, boost::assign::list_of(RDATA_IP))
+	(RT_AAAA, boost::assign::list_of(RDATA_IPV6))
 	(RT_SOA, boost::assign::list_of(RDATA_NAME)(RDATA_NAME)(RDATA_UINT32)(RDATA_UINT32)(RDATA_UINT32)(RDATA_UINT32)(RDATA_UINT32))
-	(RT_OPT, boost::assign::list_of(RDATA_DUMPHEX))
-	(RT_MX, boost::assign::list_of(RDATA_UINT16)(RDATA_NAME));
+	(RT_SRV, boost::assign::list_of(RDATA_UINT16)(RDATA_UINT16)(RDATA_UINT16)(RDATA_RNAME))
+	(RT_OPT, boost::assign::list_of(RDATA_DUMPHEX));
 // For all non-common types, just treat them as raw bytes.
 // Actually only types with RDATA_NAME fields must be taken special care of (since they may be compressed)
 // Those without a RDATA_NAME that are in rdfmt are only for prettier dump
 static const std::vector<RdataFields> hexdump = boost::assign::list_of(RDATA_UNKNOWN);
 
-static int dump_rdata(const char *begin, const char *str, uint16_t rtype, int len)
+static int dump_rdata(const char *begin, const char *str, uint16_t rtype, int len, bool ptr)
 {
 	auto itype = rdfmt.find(rtype);
 	const std::vector<RdataFields> &fmt = itype != rdfmt.end() ? itype->second : hexdump;
@@ -211,6 +217,7 @@ static int dump_rdata(const char *begin, const char *str, uint16_t rtype, int le
 		switch (*fld)
 		{
 		case RDATA_NAME:
+		case RDATA_RNAME:
 		{
 			int nameptr = pos - begin;
 			int namel = getName((const char *)pos, len - (pos - str));
@@ -218,7 +225,10 @@ static int dump_rdata(const char *begin, const char *str, uint16_t rtype, int le
 				PELOG_ERROR_RETURN((PLV_ERROR, "Invalid name.\n"), -1);
 			abuf<char> namebuf;
 			name2pname((const char *)pos, namel, namebuf);
-			fprintf(stderr, "(%d)%s ", nameptr, namebuf.buf());
+			if (ptr && *fld == RDATA_NAME)
+				fprintf(stderr, "(%d)%s ", nameptr, namebuf.buf());
+			else
+				fprintf(stderr, "%s ", namebuf.buf());
 			pos += namel;
 			break;
 		}
@@ -229,6 +239,17 @@ static int dump_rdata(const char *begin, const char *str, uint16_t rtype, int le
 			const unsigned char *pip = (const unsigned char *)pos;
 			fprintf(stderr, "%d.%d.%d.%d ", (int)pip[0], (int)pip[1], (int)pip[2], (int)pip[3]);
 			pos += 4;
+			break;
+		}
+		case RDATA_IPV6:
+		{
+			if (len - (pos - str) < 16)
+				PELOG_ERROR_RETURN((PLV_ERROR, "Invalid IPv6.\n"), -1);
+			asio::ip::address_v6::bytes_type ipbytes;
+			memcpy(ipbytes.data(), pos, 16);
+			asio::ip::address_v6 ip(ipbytes);
+			fprintf(stderr, "%s ", ip.to_string().c_str());
+			pos += 16;
 			break;
 		}
 		case RDATA_UINT16:
@@ -245,6 +266,31 @@ static int dump_rdata(const char *begin, const char *str, uint16_t rtype, int le
 				PELOG_ERROR_RETURN((PLV_ERROR, "Invalid uint32.\n"), -1);
 			fprintf(stderr, "%u ", ntohl(*(const uint32_t *)pos));
 			pos += 4;
+			break;
+		}
+		case RDATA_STRING:
+		{
+			int slen = *(const unsigned char *)pos;
+			if (len - (pos - str) < slen + 1)
+				PELOG_ERROR_RETURN((PLV_ERROR, "Invalid string.\n"), -1);
+			fprintf(stderr, "\"");
+			fwrite(pos + 1, 1, slen, stderr);
+			fprintf(stderr, "\" ");
+			pos += slen + 1;
+			break;
+		}
+		case RDATA_TXT:
+		{
+			while (len > pos - str)
+			{
+				int slen = *(const unsigned char *)pos;
+				if (len - (pos - str) < slen + 1)
+					PELOG_ERROR_RETURN((PLV_ERROR, "Invalid string.\n"), -1);
+				fprintf(stderr, "\"");
+				fwrite(pos + 1, 1, slen, stderr);
+				fprintf(stderr, "\" ");
+				pos += slen + 1;
+			}
 			break;
 		}
 		default:

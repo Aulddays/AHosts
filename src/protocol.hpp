@@ -12,6 +12,7 @@ enum ResourceType
 	RT_WKS = 11,
 	RT_PTR = 12,
 	RT_MX = 15,
+	RT_TXT = 16,
 	RT_AAAA = 28,
 	RT_SRV = 33,
 	RT_OPT = 41,
