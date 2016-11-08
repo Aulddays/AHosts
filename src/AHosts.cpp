@@ -110,7 +110,7 @@ int AHostsJob::request(const aulddays::abuf<char> &req)
 	m_request.reserve(std::max(req.size(), (size_t)512));
 	m_request.scopyFrom(req);
 	PELOG_LOG((PLV_DEBUG, "Dump request:\n"));
-	dump_packet(m_request);
+	dump_message(m_request);
 	m_status = JOB_REQUESTING;
 	const static asio::ip::udp::endpoint serverconf[] = {
 		asio::ip::udp::endpoint(asio::ip::address::from_string("208.67.222.222"), 53),
@@ -154,7 +154,7 @@ int AHostsJob::serverComplete(DnsServer *server, aulddays::abuf<char> &response)
 		if (response.size() > 0)
 		{
 			PELOG_LOG((PLV_DEBUG, "Dump response:\n"));
-			dump_packet(response);
+			dump_message(response);
 			m_client->response(response);
 			m_status = JOB_GOTANSWER;
 			if (m_server.size() > 0)	// cancel other server since we've got answer
