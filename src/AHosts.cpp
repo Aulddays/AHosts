@@ -107,10 +107,14 @@ AHostsJob::AHostsJob(AHosts *ahosts, asio::io_service &ioService,
 
 int AHostsJob::request(const aulddays::abuf<char> &req)
 {
+	PELOG_LOG((PLV_DEBUG, "Dump request(" PL_SIZET "):\n", req.size()));
+	dump_message(req);
+	abuf<char> dcompreq;
+	decompressMessage(req, dcompreq);
+	PELOG_LOG((PLV_DEBUG, "Decompressed request(" PL_SIZET "):\n", dcompreq.size()));
+	dump_message(dcompreq);
 	m_request.reserve(std::max(req.size(), (size_t)512));
 	m_request.scopyFrom(req);
-	PELOG_LOG((PLV_DEBUG, "Dump request:\n"));
-	dump_message(m_request);
 	m_status = JOB_REQUESTING;
 	const static asio::ip::udp::endpoint serverconf[] = {
 		asio::ip::udp::endpoint(asio::ip::address::from_string("208.67.222.222"), 53),
@@ -153,8 +157,12 @@ int AHostsJob::serverComplete(DnsServer *server, aulddays::abuf<char> &response)
 	{
 		if (response.size() > 0)
 		{
-			PELOG_LOG((PLV_DEBUG, "Dump response:\n"));
+			PELOG_LOG((PLV_DEBUG, "Dump response(" PL_SIZET "):\n", response.size()));
 			dump_message(response);
+			abuf<char> dcompresp;
+			decompressMessage(response, dcompresp);
+			PELOG_LOG((PLV_DEBUG, "Decompressed response(" PL_SIZET "):\n", dcompresp.size()));
+			dump_message(dcompresp, false);
 			m_client->response(response);
 			m_status = JOB_GOTANSWER;
 			if (m_server.size() > 0)	// cancel other server since we've got answer

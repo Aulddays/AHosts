@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "protocol.hpp"
 #include <boost/assign.hpp>
+#include <boost/static_assert.hpp>
 #include <map>
 
 // get qname at str, return length. if error occurred, return -1
@@ -95,8 +96,8 @@ const char *type2name(uint16_t type)
 // |                    ARCOUNT                    |
 // +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 
-static int dump_rdata(const char *begin, const char *pos, uint16_t rtype, int len, bool ptr = true);
-void dump_message(const aulddays::abuf<char> &pkt)
+static int dump_rdata(const char *begin, const char *pos, uint16_t rtype, int len, bool ptr);
+void dump_message(const aulddays::abuf<char> &pkt, bool dumpnameptr)
 {
 	const unsigned char *pos = (const unsigned char *)pkt.buf();
 	fprintf(stderr, "  ID: %d\n", (int)ntohs(*(const uint16_t *)pos));
@@ -123,12 +124,17 @@ void dump_message(const aulddays::abuf<char> &pkt)
 			abuf<char> namebuf;
 			name2pname((const char *)pos, namel, namebuf);
 			pos += namel;
+			if ((const char *)pos - pkt + 4 > (int)pkt.size())
+				PELOG_ERROR_RETURNVOID((PLV_ERROR, "Incomplete rdata\n"));
 			uint16_t qtype = ntohs(*(const uint16_t *)pos);
 			pos += 2;
 			uint16_t qclass = ntohs(*(const uint16_t *)pos);
 			pos += 2;
-			fprintf(stderr, "  (%d)%s\t%s\t%s\n", nameptr, namebuf.buf(),
-				class2name(qclass), type2name(qtype));
+			if (dumpnameptr)
+				fprintf(stderr, "  (%d)%s\t%s\t%s\n", nameptr, namebuf.buf(),
+					class2name(qclass), type2name(qtype));
+			else
+				fprintf(stderr, "  %s\t%s\t%s\n", namebuf.buf(), class2name(qclass), type2name(qtype));
 		}
 	}
 	int *secnums[] = {&anc, &nsc, &arc};
@@ -165,10 +171,13 @@ void dump_message(const aulddays::abuf<char> &pkt)
 					fprintf(stderr, "  %s\tudp:%d, ERCODE:%d, VERSION:%d, DO:%d\t", type2name(rtype), (int)rclass,
 						(int)*pttl, (int)pttl[1], (int)(pttl[2] >> 7));
 				}
-				else
+				else if (dumpnameptr)
 					fprintf(stderr, "  (%d)%s\t%d\t%s\t%s\t", nameptr, namebuf.buf(), ttl,
 						class2name(rclass), type2name(rtype));
-				int res = dump_rdata(pkt, (const char *)pos, rtype, rlen);
+				else
+					fprintf(stderr, "  %s\t%d\t%s\t%s\t", namebuf.buf(), ttl,
+					class2name(rclass), type2name(rtype));
+				int res = dump_rdata(pkt, (const char *)pos, rtype, rlen, dumpnameptr);
 				fprintf(stderr, "\n");
 				if (res)
 					PELOG_ERROR_RETURNVOID((PLV_ERROR, "Invalid rdata\n"));
@@ -178,18 +187,17 @@ void dump_message(const aulddays::abuf<char> &pkt)
 	}	// for each section
 }
 
-static int decompressName(const unsigned char *in, const unsigned char *pin,
-	unsigned char *&pout, int outlen);
-// make sure that `out` has enough room for one decompressed name
-static void reserveName(const aulddays::abuf<char> &in, const char *pin,
-	aulddays::abuf<char> &out, char *&pout)
-{
-}
+static int decompressName(const abuf<char> &in, const unsigned char *&pin,
+	abuf<char> &out, unsigned char *&pout);
+static int decompressRdata(const abuf<char> &in, const unsigned char *&pin,
+	abuf<char> &out, unsigned char *&pout, uint16_t rtype, int len);
 int decompressMessage(const aulddays::abuf<char> &in, aulddays::abuf<char> &out)
 {
 	out.resize(in.size() + 512);
 	const unsigned char *pin = (const unsigned char *)in.buf();
+	const unsigned char * const pib = (const unsigned char *)in.buf();
 	unsigned char *pout = (unsigned char *)out.buf();
+	// Must not define a pob here since `out.buf()` may change
 
 	// head
 	int qdc = (int)ntohs(*(const uint16_t *)(pin + 4));
@@ -203,19 +211,13 @@ int decompressMessage(const aulddays::abuf<char> &in, aulddays::abuf<char> &out)
 	// query section
 	for (int i = 0; i < qdc; ++i)
 	{
-		int nameptr = (const char *)pin - in;
-		int namel = getName((const char *)pin, in.size() - nameptr);
-		if (namel < 0)
-			PELOG_ERROR_RETURN((PLV_ERROR, "Invalid name.\n"), -1);
-		abuf<char> namebuf;
-		name2pname((const char *)pin, namel, namebuf);
-		pin += namel;
-		uint16_t qtype = ntohs(*(const uint16_t *)pin);
-		pin += 2;
-		uint16_t qclass = ntohs(*(const uint16_t *)pin);
-		pin += 2;
-		fprintf(stderr, "  (%d)%s\t%s\t%s\n", nameptr, namebuf.buf(),
-			class2name(qclass), type2name(qtype));
+		if (int res = decompressName(in, pin, out, pout))
+			PELOG_ERROR_RETURN((PLV_ERROR, "decompressName failed.\n"), res);
+		if (pin + 4 - pib > (int)in.size() || pout + 4 - (unsigned char *)out.buf() > (int)out.size())
+			PELOG_ERROR_RETURN((PLV_ERROR, "Invalid question record.\n"), -1);
+		memcpy(pout, pin, 4);
+		pin += 4;
+		pout += 4;
 	}
 
 	int *secnums[] = { &anc, &nsc, &arc };
@@ -224,63 +226,60 @@ int decompressMessage(const aulddays::abuf<char> &in, aulddays::abuf<char> &out)
 	{
 		if (*secnums[isec] > 0)
 		{
-			fprintf(stderr, "  ;; %s SECTION:\n", secnames[isec]);
 			for (int ient = 0; ient < *secnums[isec]; ++ient)
 			{
-				int nameptr = (const char *)pin - in;
-				int namel = getName((const char *)pin, in.size() - nameptr);
-				if (namel < 0)
-					PELOG_ERROR_RETURN((PLV_ERROR, "Invalid name.\n"), -1);
-				abuf<char> namebuf;
-				name2pname((const char *)pin, namel, namebuf);
-				pin += namel;
-				if ((const char *)pin - in + 10 >(int)in.size())
-					PELOG_ERROR_RETURN((PLV_ERROR, "Incomplete rdata\n"), -1);
+				if (int res = decompressName(in, pin, out, pout))
+					PELOG_ERROR_RETURN((PLV_ERROR, "decompressName failed %s %d.\n", secnames[isec], isec), res);
+				if (pin + 10 - pib > (int)in.size() || pout + 10 - (unsigned char *)out.buf() > (int)out.size())
+					PELOG_ERROR_RETURN((PLV_ERROR, "Incomplete %s record %d.\n", secnames[isec], isec), -1);
 				uint16_t rtype = ntohs(*(const uint16_t *)pin);
-				pin += 2;
-				uint16_t rclass = ntohs(*(const uint16_t *)pin);
-				pin += 2;
-				const unsigned char *pttl = pin;	// for opt extended RCODE and flags
-				uint32_t ttl = ntohl(*(const uint32_t *)pin);
-				pin += 4;
-				uint16_t rlen = ntohs(*(const uint16_t *)pin);
-				pin += 2;
-				if ((const char *)pin - in + rlen > (int)in.size())
-					PELOG_ERROR_RETURN((PLV_ERROR, "Incomplete rdata\n"), -1);
-				if (rtype == RT_OPT)
-				{
-					fprintf(stderr, "  %s\tudp:%d, ERCODE:%d, VERSION:%d, DO:%d\t", type2name(rtype), (int)rclass,
-						(int)*pttl, (int)pttl[1], (int)(pttl[2] >> 7));
-				}
-				else
-					fprintf(stderr, "  (%d)%s\t%d\t%s\t%s\t", nameptr, namebuf.buf(), ttl,
-					class2name(rclass), type2name(rtype));
-				int res = dump_rdata(in, (const char *)pin, rtype, rlen);
-				fprintf(stderr, "\n");
-				if (res)
-					PELOG_ERROR_RETURN((PLV_ERROR, "Invalid rdata\n"), -1);
-				pin += rlen;
+				uint16_t rlen = ntohs(*(const uint16_t *)(pin + 8));
+				int lenpos = (char *)pout + 8 - out.buf();	// pos to write back new rlen.
+				memcpy(pout, pin, 10);
+				pin += 10;
+				pout += 10;
+				if (pin + rlen - pib > (int)in.size() || pout + rlen - (unsigned char *)out.buf() > (int)out.size())
+					PELOG_ERROR_RETURN((PLV_ERROR, "Incomplete %s rdata %d.\n", secnames[isec], isec), -1);
+				int rdatapos = (char *)pout - out.buf();	// pos of rdata
+				if (int res = decompressRdata(in, pin, out, pout, rtype, rlen))
+					PELOG_ERROR_RETURN((PLV_ERROR, "Invalid %s rdata %d.\n", secnames[isec], isec), res);
+				int rdataend = (char *)pout - out.buf();	// end of rdata
+				// Write back new rdata. poses must not be pointer since in.buf() may change
+				*(uint16_t *)(out.buf() + lenpos) = htons((uint16_t)(rdataend - rdatapos));
 			}	// for each record
 		}
 	}	// for each section
+	out.resize((char *)pout - out.buf());
 	return 0;
 }
 
 // RDATA format information used for parsing/compressing/decompressing/dumping
 enum RdataFields	// basic fields
 {
-	RDATA_NAME,
-	RDATA_RNAME,		// same as RDATA_NAME but no compress (no pointer)
+	// fields with fixed sizes
 	RDATA_UINT32,
 	RDATA_UINT16,
 	RDATA_UINT8,
 	RDATA_IP,
 	RDATA_IPV6,
+	RDATA_SIZEMAX = RDATA_IPV6,
+	// fields with variable sizes
+	RDATA_NAME,
+	RDATA_RNAME,		// same as RDATA_NAME but no compress (no pointer)
 	RDATA_STRING,
 	RDATA_TXT,
 	RDATA_DUMPHEX,
 	RDATA_UNKNOWN,
 };
+static const size_t RdataFieldSize[] = 
+{
+	4,	// RDATA_UINT32,
+	2,	// RDATA_UINT16,
+	1,	// RDATA_UINT8, 
+	4,	// RDATA_IP,    
+	16,	// RDATA_IPV6,  
+};
+BOOST_STATIC_ASSERT(sizeof(RdataFieldSize) / sizeof(RdataFieldSize[0]) == RDATA_SIZEMAX + 1);
 // RDATA field list for each type
 static const std::map<uint16_t, std::vector<RdataFields> > rdfmt = boost::assign::map_list_of
 	(RT_A, boost::assign::list_of(RDATA_IP))
@@ -422,4 +421,137 @@ static int dump_rdata(const char *begin, const char *str, uint16_t rtype, int le
 	if (pos - str != len)
 		PELOG_ERROR_RETURN((PLV_ERROR, "Unknown bytes in rdata.\n"), -1);
 	return 0;
+}
+
+static int decompressRdata(const abuf<char> &in, const unsigned char *&pin,
+	abuf<char> &out, unsigned char *&pout, uint16_t rtype, int len)
+{
+	if ((const char *)pin - in.buf() + len > (int)in.size())
+		PELOG_ERROR_RETURN((PLV_ERROR, "Rdata size error.\n"), -1);
+	const unsigned char *pib = pin + len;
+
+	auto itype = rdfmt.find(rtype);
+	const std::vector<RdataFields> &fmt = itype != rdfmt.end() ? itype->second : hexdump;
+	//const char *pos = str;
+	for (auto fld = fmt.begin(); fld != fmt.end(); ++fld)
+	{
+		int inleft = pib - pin;
+		int outleft = (int)out.size() - ((char *)pout - out.buf());
+		if (inleft < 0 || outleft < 0 || outleft < inleft)
+			PELOG_ERROR_RETURN((PLV_ERROR, "Rdata size error.\n"), -1);
+		if (*fld <= RDATA_SIZEMAX)	// fixed sized raw copy
+		{
+			size_t csize = RdataFieldSize[*fld];
+			if (inleft < (int)csize || outleft < (int)csize)
+				PELOG_ERROR_RETURN((PLV_ERROR, "Rdata size error.\n"), -1);
+			memcpy(pout, pin, csize);
+			pout += csize;
+			pin += csize;
+			continue;
+		}
+		switch (*fld)
+		{
+		case RDATA_NAME:
+		case RDATA_RNAME:
+		{
+			if (int res = decompressName(in, pin, out, pout))
+				PELOG_ERROR_RETURN((PLV_ERROR, "decompressName failed.\n"), res);
+			break;
+		}
+		case RDATA_STRING:
+		{
+			if (inleft <= 0 || outleft <= 0)
+				PELOG_ERROR_RETURN((PLV_ERROR, "Invalid string.\n"), -1);
+			int slen = *(const unsigned char *)pin;
+			if (inleft < slen + 1 || outleft < slen + 1)
+				PELOG_ERROR_RETURN((PLV_ERROR, "Invalid string.\n"), -1);
+			memcpy(pout, pin, slen + 1);
+			pin += slen + 1;
+			pout += slen + 1;
+			break;
+		}
+		case RDATA_TXT:
+		{
+			while (inleft > 0)
+			{
+				int slen = *(const unsigned char *)pin;
+				if (inleft < slen + 1 || outleft < slen + 1)
+					PELOG_ERROR_RETURN((PLV_ERROR, "Invalid txt.\n"), -1);
+				memcpy(pout, pin, slen + 1);
+				pin += slen + 1;
+				pout += slen + 1;
+				inleft -= slen + 1;
+				outleft -= slen + 1;
+			}
+			break;
+		}
+		case RDATA_DUMPHEX:
+		default:
+		{
+			memcpy(pout, pin, inleft);
+			pin += inleft;
+			pout += inleft;
+			break;
+		}
+		}
+	}
+	if (pin != pib)
+		PELOG_ERROR_RETURN((PLV_ERROR, "Unknown bytes in rdata.\n"), -1);
+	return 0;
+}
+
+static int decompressName(const abuf<char> &in, const unsigned char *&pin,
+	abuf<char> &out, unsigned char *&pout)
+{
+	const unsigned char * const pib = (const unsigned char *)in.buf();
+	unsigned char * pob = (unsigned char *)out.buf();
+	// A decompressed name is at most 256B long. Make sure out has that extra space
+	if (in.size() - (pin - pib) + 256 > out.size() - (pout - pob))
+	{
+		int iout = pout - pob;	// out.buf() would change after resize, reserve pout
+		out.resize(out.size() + 512);
+		assert(in.size() - (pin - pib) + 256 <= out.size() - (pout - pob));
+		pob = (unsigned char *)out.buf();
+		pout = pob + iout;
+	}
+	unsigned char * const poe = pout + (out.size() - (pout - pob) - (in.size() - (pin - pib)));
+	const unsigned char * const pie = pib + in.size();
+	const unsigned char *ppin = pin;	// pin should not move through pointer, so make a copy
+	bool pointered = false;	// whether ppin has jumped through a pointer
+	while (ppin < pie && pout < poe)
+	{
+		if (*ppin >= 64)	// a pointer
+		{
+			unsigned int pointer = ntohs(*(const uint16_t *)ppin) & 0x3fff;
+			if (pointer > in.size())
+				PELOG_ERROR_RETURN((PLV_ERROR, "Invalid pointer in name.\n"), -1);
+			if (!pointered)
+			{
+				pin += 2;
+				pointered = true;
+			}
+			ppin = pib + pointer;
+			continue;
+		}
+		else if (*ppin == 0)	// end
+		{
+			*pout++ = 0;
+			if (!pointered)
+				++pin;
+			return 0;
+		}
+		else	// a normal label
+		{
+			int len = *ppin;
+			if (ppin + len + 1 > pie || pout + len + 1 > poe)
+				PELOG_ERROR_RETURN((PLV_ERROR, "Invalid name.\n"), -1);
+			*pout++ = *ppin++;
+			for (int i = 0; i < len; ++i)
+				*pout++ = tolower(*ppin++);
+			if (!pointered)
+				pin += len + 1;
+		}
+	}
+	// pin or pout exceeds limit, something must be wrong
+	PELOG_ERROR_RETURN((PLV_ERROR, "Invalid name.\n"), -1);
 }

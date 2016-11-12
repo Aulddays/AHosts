@@ -57,4 +57,4 @@ int pname2name(const char *str, aulddays::abuf<char> &out);
 int decompressMessage(const aulddays::abuf<char> &in, aulddays::abuf<char> &out);
 int compressMessage(const aulddays::abuf<char> &in, aulddays::abuf<char> &out);
 
-void dump_message(const aulddays::abuf<char> &pkt);
+void dump_message(const aulddays::abuf<char> &pkt, bool dumpnameptr = true);
