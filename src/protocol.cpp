@@ -96,8 +96,8 @@ const char *type2name(uint16_t type)
 // |                    ARCOUNT                    |
 // +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 
-static int dump_rdata(const char *begin, const char *pos, uint16_t rtype, int len, bool ptr);
-void dump_message(const aulddays::abuf<char> &pkt, bool dumpnameptr)
+static int dumpRdata(const char *begin, const char *pos, uint16_t rtype, int len, bool ptr);
+void dumpMessage(const aulddays::abuf<char> &pkt, bool dumpnameptr)
 {
 	const unsigned char *pos = (const unsigned char *)pkt.buf();
 	fprintf(stderr, "  ID: %d\n", (int)ntohs(*(const uint16_t *)pos));
@@ -114,7 +114,7 @@ void dump_message(const aulddays::abuf<char> &pkt, bool dumpnameptr)
 	pos += 12;
 	if (qdc > 0)
 	{
-		fprintf(stderr, "  ;; QUERY SECTION:\n");
+		fprintf(stderr, "  ;; QUESTION SECTION:\n");
 		for (int i = 0; i < qdc; ++i)
 		{
 			int nameptr = (const char *)pos - pkt;
@@ -177,7 +177,7 @@ void dump_message(const aulddays::abuf<char> &pkt, bool dumpnameptr)
 				else
 					fprintf(stderr, "  %s\t%d\t%s\t%s\t", namebuf.buf(), ttl,
 					class2name(rclass), type2name(rtype));
-				int res = dump_rdata(pkt, (const char *)pos, rtype, rlen, dumpnameptr);
+				int res = dumpRdata(pkt, (const char *)pos, rtype, rlen, dumpnameptr);
 				fprintf(stderr, "\n");
 				if (res)
 					PELOG_ERROR_RETURNVOID((PLV_ERROR, "Invalid rdata\n"));
@@ -189,15 +189,19 @@ void dump_message(const aulddays::abuf<char> &pkt, bool dumpnameptr)
 
 static int decompressName(const abuf<char> &in, const unsigned char *&pin,
 	abuf<char> &out, unsigned char *&pout);
-static int decompressRdata(const abuf<char> &in, const unsigned char *&pin,
-	abuf<char> &out, unsigned char *&pout, uint16_t rtype, int len);
-int decompressMessage(const aulddays::abuf<char> &in, aulddays::abuf<char> &out)
+static int compressName(const abuf<char> &in, const unsigned char *&pin,
+	abuf<char> &out, unsigned char *&pout, std::map<std::string, uint16_t> &names);
+static int codecRdata(bool compress, const abuf<char> &in, const unsigned char *&pin,
+	abuf<char> &out, unsigned char *&pout, uint16_t rtype, int len,
+	std::map<std::string, uint16_t> &names);
+int codecMessage(bool compress, const aulddays::abuf<char> &in, aulddays::abuf<char> &out)
 {
 	out.resize(in.size() + 512);
 	const unsigned char *pin = (const unsigned char *)in.buf();
 	const unsigned char * const pib = (const unsigned char *)in.buf();
 	unsigned char *pout = (unsigned char *)out.buf();
 	// Must not define a pob here since `out.buf()` may change
+	std::map<std::string, uint16_t> names;	// known names for compression
 
 	// head
 	int qdc = (int)ntohs(*(const uint16_t *)(pin + 4));
@@ -211,8 +215,8 @@ int decompressMessage(const aulddays::abuf<char> &in, aulddays::abuf<char> &out)
 	// query section
 	for (int i = 0; i < qdc; ++i)
 	{
-		if (int res = decompressName(in, pin, out, pout))
-			PELOG_ERROR_RETURN((PLV_ERROR, "decompressName failed.\n"), res);
+		if (int res = (compress ? compressName(in, pin, out, pout, names) : decompressName(in, pin, out, pout)))
+			PELOG_ERROR_RETURN((PLV_ERROR, "%scompressName failed.\n", compress ? "" : "de"), res);
 		if (pin + 4 - pib > (int)in.size() || pout + 4 - (unsigned char *)out.buf() > (int)out.size())
 			PELOG_ERROR_RETURN((PLV_ERROR, "Invalid question record.\n"), -1);
 		memcpy(pout, pin, 4);
@@ -228,8 +232,9 @@ int decompressMessage(const aulddays::abuf<char> &in, aulddays::abuf<char> &out)
 		{
 			for (int ient = 0; ient < *secnums[isec]; ++ient)
 			{
-				if (int res = decompressName(in, pin, out, pout))
-					PELOG_ERROR_RETURN((PLV_ERROR, "decompressName failed %s %d.\n", secnames[isec], isec), res);
+				if (int res = compress ? compressName(in, pin, out, pout, names) : decompressName(in, pin, out, pout))
+					PELOG_ERROR_RETURN((PLV_ERROR, "%scompressName failed %s %d.\n",
+						compress ? "" : "de", secnames[isec], isec), res);
 				if (pin + 10 - pib > (int)in.size() || pout + 10 - (unsigned char *)out.buf() > (int)out.size())
 					PELOG_ERROR_RETURN((PLV_ERROR, "Incomplete %s record %d.\n", secnames[isec], isec), -1);
 				uint16_t rtype = ntohs(*(const uint16_t *)pin);
@@ -241,7 +246,7 @@ int decompressMessage(const aulddays::abuf<char> &in, aulddays::abuf<char> &out)
 				if (pin + rlen - pib > (int)in.size() || pout + rlen - (unsigned char *)out.buf() > (int)out.size())
 					PELOG_ERROR_RETURN((PLV_ERROR, "Incomplete %s rdata %d.\n", secnames[isec], isec), -1);
 				int rdatapos = (char *)pout - out.buf();	// pos of rdata
-				if (int res = decompressRdata(in, pin, out, pout, rtype, rlen))
+				if (int res = codecRdata(compress, in, pin, out, pout, rtype, rlen, names))
 					PELOG_ERROR_RETURN((PLV_ERROR, "Invalid %s rdata %d.\n", secnames[isec], isec), res);
 				int rdataend = (char *)pout - out.buf();	// end of rdata
 				// Write back new rdata. poses must not be pointer since in.buf() may change
@@ -311,7 +316,7 @@ static const std::map<uint16_t, std::vector<RdataFields> > rdfmt = boost::assign
 // Those without a RDATA_NAME that are in rdfmt are only for prettier dump
 static const std::vector<RdataFields> hexdump = boost::assign::list_of(RDATA_UNKNOWN);
 
-static int dump_rdata(const char *begin, const char *str, uint16_t rtype, int len, bool ptr)
+static int dumpRdata(const char *begin, const char *str, uint16_t rtype, int len, bool ptr)
 {
 	auto itype = rdfmt.find(rtype);
 	const std::vector<RdataFields> &fmt = itype != rdfmt.end() ? itype->second : hexdump;
@@ -423,8 +428,9 @@ static int dump_rdata(const char *begin, const char *str, uint16_t rtype, int le
 	return 0;
 }
 
-static int decompressRdata(const abuf<char> &in, const unsigned char *&pin,
-	abuf<char> &out, unsigned char *&pout, uint16_t rtype, int len)
+static int codecRdata(bool compress, const abuf<char> &in, const unsigned char *&pin,
+	abuf<char> &out, unsigned char *&pout, uint16_t rtype, int len,
+	std::map<std::string, uint16_t> &names)
 {
 	if ((const char *)pin - in.buf() + len > (int)in.size())
 		PELOG_ERROR_RETURN((PLV_ERROR, "Rdata size error.\n"), -1);
@@ -454,8 +460,9 @@ static int decompressRdata(const abuf<char> &in, const unsigned char *&pin,
 		case RDATA_NAME:
 		case RDATA_RNAME:
 		{
-			if (int res = decompressName(in, pin, out, pout))
-				PELOG_ERROR_RETURN((PLV_ERROR, "decompressName failed.\n"), res);
+			if (int res = (compress && *fld == RDATA_NAME) ?
+					compressName(in, pin, out, pout, names) : decompressName(in, pin, out, pout))
+				PELOG_ERROR_RETURN((PLV_ERROR, "%scompressName failed.\n", compress ? "" : "de"), res);
 			break;
 		}
 		case RDATA_STRING:
@@ -504,6 +511,7 @@ static int decompressName(const abuf<char> &in, const unsigned char *&pin,
 	abuf<char> &out, unsigned char *&pout)
 {
 	const unsigned char * const pib = (const unsigned char *)in.buf();
+	const unsigned char * const pie = pib + in.size();
 	unsigned char * pob = (unsigned char *)out.buf();
 	// A decompressed name is at most 256B long. Make sure out has that extra space
 	if (in.size() - (pin - pib) + 256 > out.size() - (pout - pob))
@@ -515,7 +523,6 @@ static int decompressName(const abuf<char> &in, const unsigned char *&pin,
 		pout = pob + iout;
 	}
 	unsigned char * const poe = pout + (out.size() - (pout - pob) - (in.size() - (pin - pib)));
-	const unsigned char * const pie = pib + in.size();
 	const unsigned char *ppin = pin;	// pin should not move through pointer, so make a copy
 	bool pointered = false;	// whether ppin has jumped through a pointer
 	while (ppin < pie && pout < poe)
@@ -551,6 +558,54 @@ static int decompressName(const abuf<char> &in, const unsigned char *&pin,
 			if (!pointered)
 				pin += len + 1;
 		}
+	}
+	// pin or pout exceeds limit, something must be wrong
+	PELOG_ERROR_RETURN((PLV_ERROR, "Invalid name.\n"), -1);
+}
+
+static int compressName(const abuf<char> &in, const unsigned char *&pin,
+	abuf<char> &out, unsigned char *&pout, std::map<std::string, uint16_t> &names)
+{
+	const unsigned char * const pib = (const unsigned char *)in.buf();
+	unsigned char * const pob = (unsigned char *)out.buf();
+	unsigned char * const poe = pob + out.size();
+
+	// find the input end, and check the validity of pin to avoid buffer overflow
+	const unsigned char * pie = pin;
+	for ( ; *pie; pie += *pie + 1)
+	{
+		if (*pie >= 64)
+			PELOG_ERROR_RETURN((PLV_ERROR, "Trying to compress an already compressd name.\n"), -1);
+		if (pie - pib + *pie + 1 >= (int)in.size())
+			PELOG_ERROR_RETURN((PLV_ERROR, "Trying to compress an invalid name.\n"), -1);
+	}
+	++pie;	// now pie is the first byte after the input name
+
+	while (pout < poe)
+	{
+		if (*pin == 0)	// end
+		{
+			*pout++ = *pin++;
+			return 0;
+		}
+		// test whether current name can be compressed
+		auto iname = names.find((char *)pin);
+		if (iname != names.end())	// a known name, just replace it with a pointer
+		{
+			if (pout + 1 >= poe)
+				PELOG_ERROR_RETURN((PLV_ERROR, "Insufficient compression buffer.\n"), -1);
+			*(uint16_t *)pout = htons(iname->second | (uint16_t)0xc000);
+			pin = pie;
+			pout += 2;
+			return 0;
+		}
+		// must be a new name
+		names[(char *)pin] = pout - pob;	// Add it to known names
+		if (pout - pob + *pin + 1 >= (int)out.size())
+			PELOG_ERROR_RETURN((PLV_ERROR, "Insufficient compression buffer.\n"), -1);
+		memcpy(pout, pin, *pin + 1);
+		pout += *pin + 1;
+		pin += *pin + 1;
 	}
 	// pin or pout exceeds limit, something must be wrong
 	PELOG_ERROR_RETURN((PLV_ERROR, "Invalid name.\n"), -1);

@@ -108,11 +108,15 @@ AHostsJob::AHostsJob(AHosts *ahosts, asio::io_service &ioService,
 int AHostsJob::request(const aulddays::abuf<char> &req)
 {
 	PELOG_LOG((PLV_DEBUG, "Dump request(" PL_SIZET "):\n", req.size()));
-	dump_message(req);
+	dumpMessage(req);
 	abuf<char> dcompreq;
-	decompressMessage(req, dcompreq);
+	codecMessage(false, req, dcompreq);
 	PELOG_LOG((PLV_DEBUG, "Decompressed request(" PL_SIZET "):\n", dcompreq.size()));
-	dump_message(dcompreq);
+	dumpMessage(dcompreq, false);
+	abuf<char> newreq;
+	codecMessage(true, dcompreq, newreq);
+	PELOG_LOG((PLV_DEBUG, "Recompressed request(" PL_SIZET "):\n", newreq.size()));
+	dumpMessage(newreq);
 	m_request.reserve(std::max(req.size(), (size_t)512));
 	m_request.scopyFrom(req);
 	m_status = JOB_REQUESTING;
@@ -158,11 +162,15 @@ int AHostsJob::serverComplete(DnsServer *server, aulddays::abuf<char> &response)
 		if (response.size() > 0)
 		{
 			PELOG_LOG((PLV_DEBUG, "Dump response(" PL_SIZET "):\n", response.size()));
-			dump_message(response);
+			dumpMessage(response);
 			abuf<char> dcompresp;
-			decompressMessage(response, dcompresp);
+			codecMessage(false, response, dcompresp);
 			PELOG_LOG((PLV_DEBUG, "Decompressed response(" PL_SIZET "):\n", dcompresp.size()));
-			dump_message(dcompresp, false);
+			dumpMessage(dcompresp, false);
+			abuf<char> newresp;
+			codecMessage(true, dcompresp, newresp);
+			PELOG_LOG((PLV_DEBUG, "Recompressed response(" PL_SIZET "):\n", newresp.size()));
+			dumpMessage(newresp);
 			m_client->response(response);
 			m_status = JOB_GOTANSWER;
 			if (m_server.size() > 0)	// cancel other server since we've got answer

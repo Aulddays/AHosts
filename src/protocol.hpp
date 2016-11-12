@@ -54,7 +54,6 @@ void name2pname(const char *str, size_t len, aulddays::abuf<char> &out);
 int pname2name(const char *str, aulddays::abuf<char> &out);
 
 // compress/decompress dns packet
-int decompressMessage(const aulddays::abuf<char> &in, aulddays::abuf<char> &out);
-int compressMessage(const aulddays::abuf<char> &in, aulddays::abuf<char> &out);
+int codecMessage(bool compress, const aulddays::abuf<char> &in, aulddays::abuf<char> &out);
 
-void dump_message(const aulddays::abuf<char> &pkt, bool dumpnameptr = true);
+void dumpMessage(const aulddays::abuf<char> &pkt, bool dumpnameptr = true);
