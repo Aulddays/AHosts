@@ -6,6 +6,7 @@
 #include "asio.hpp"
 #include "auto_buf.hpp"
 #include "AHostsConf.hpp"
+#include "AHostsCache.hpp"
 
 extern boost::mt19937 AHostsRand;
 
@@ -16,6 +17,7 @@ public:
 	DnsClient(AHostsJob *job, asio::io_service &ioService, unsigned int timeout)
 		: m_job(job), m_ioService(ioService), m_id(-1), m_timeout(timeout), m_status(CLIENT_BEGIN) {}
 	virtual ~DnsClient(){}
+	virtual int run() = 0;
 	virtual int response(aulddays::abuf<char> &res) = 0;
 	virtual int cancel() = 0;	// no response to client
 	virtual int heartBeat(const boost::posix_time::ptime &now) = 0;
@@ -88,19 +90,29 @@ private:
 	{
 		JOB_BEGIN,	// receiving request from client, only for tcp client
 		JOB_REQUESTING,	// requesting recursive servers
+		JOB_EARLYRET,	// returned the expired cache data
+		JOB_NOEARLYRET,	// no (even expired) cache found
 		JOB_GOTANSWER,	// got answer from some server
 		JOB_RESPONDED	// sent response to client
 	} m_status;	// client and server complete status
+	abuf<char> m_reqNameType;	// name and type in the request. should contain '\0'!
+	abuf<char> m_reqPrint;	// Printable name:type of the request
+	int m_questionNum;	// number of question items in request
+	abuf<char> m_cached;
+	boost::posix_time::ptime m_start;
 };
 
 class AHosts
 {
 public:
-	AHosts() : m_uSocket(m_ioService, asio::ip::udp::v4()), m_hbTimer(m_ioService){}
+	AHosts() : m_cache(2), m_uSocket(m_ioService, asio::ip::udp::v4()), m_hbTimer(m_ioService){}
 	~AHosts(){}
 	int start();
 	int stop(){ m_ioService.stop(); return 0; }
 	int jobComplete(AHostsJob *job);
+
+	// cache
+	AHostsCache m_cache;
 private:
 	int listenUdp();
 	void onUdpRequest(const asio::error_code& error, size_t size);
@@ -127,13 +139,14 @@ class UdpClient : public DnsClient
 public:
 	UdpClient(const aulddays::abuf<char> &req, const asio::ip::udp::socket &socket, const asio::ip::udp::endpoint &remote,
 		AHostsJob *job, asio::io_service &ioService);
+	virtual int run();
 	virtual ~UdpClient(){ };
 	virtual int response(aulddays::abuf<char> &res);
 	void onResponsed(const asio::error_code& error, size_t size);
 	virtual int cancel();	// no response to client
 	virtual int heartBeat(const boost::posix_time::ptime &now);
 private:
-	//aulddays::abuf<char> m_req;
+	const aulddays::abuf<char> &m_req;
 	asio::ip::udp::socket m_socket;
 	asio::ip::udp::endpoint m_remote;
 	boost::posix_time::ptime m_start;

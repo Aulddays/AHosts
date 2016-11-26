@@ -230,7 +230,7 @@ public:
 	}
 
 	// Actual memory allocated, in number of T's
-	size_t capacity(size_t desired_element_count) const
+	size_t capacity() const
 	{
 		abuf_mem_check();
 		return _capacity;

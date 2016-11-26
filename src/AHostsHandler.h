@@ -18,7 +18,7 @@ public:
 
 private:
 	const AHostsConf *m_conf;
-	aulddays::abuf<char> m_oriName;	// original name requested
+	aulddays::abuf<char> m_oriNameType;	// original name and type requested
 	size_t m_appendNum;	// number of records to be inserted
 	aulddays::abuf<char> m_append;	// answer record(s) to be inserted
 };

@@ -98,30 +98,58 @@ void AHosts::onHeartbeat(const asio::error_code& error)
 
 AHostsJob::AHostsJob(AHosts *ahosts, asio::io_service &ioService,
 	const asio::ip::udp::socket &socket, const asio::ip::udp::endpoint &remote, const aulddays::abuf<char> &req)
-	: m_ahosts(ahosts), m_ioService(ioService), m_status(JOB_BEGIN)
+	: m_ahosts(ahosts), m_ioService(ioService), m_status(JOB_BEGIN), m_questionNum(-1)
 {
 	//m_server = new UdpServer(this, m_ioService);
 	m_client = new UdpClient(req, socket, remote, this, m_ioService);
+	m_client->run();
 	//m_server->setClient(m_client);
 }
 
 int AHostsJob::request(const aulddays::abuf<char> &req)
 {
-	PELOG_LOG((PLV_DEBUG, "Dump request(" PL_SIZET "):\n", req.size()));
-	dumpMessage(req);
+	//PELOG_LOG((PLV_DEBUG, "Dump request(" PL_SIZET "):\n", req.size()));
+	//dumpMessage(req);
+	// decompress message
 	abuf<char> dcompreq;
 	codecMessage(false, req, dcompreq);
 	PELOG_LOG((PLV_DEBUG, "Decompressed request(" PL_SIZET "):\n", dcompreq.size()));
 	dumpMessage(dcompreq, false);
-	abuf<char> newreq;
-	codecMessage(true, dcompreq, newreq);
-	PELOG_LOG((PLV_DEBUG, "Recompressed request(" PL_SIZET "):\n", newreq.size()));
-	dumpMessage(newreq);
-	m_request.reserve(std::max(req.size(), (size_t)512));
-	m_request.scopyFrom(req);
+
+	// get request and check cache
+	m_questionNum = getNameType(dcompreq, m_reqNameType);
+	nametype2print(m_reqNameType, m_reqPrint);
+	if (m_questionNum == 1)	// exactly one question record, check the cache
+	{
+		time_t uptime;
+		time_t now = time(NULL);
+		if(m_ahosts->m_cache.get(m_reqNameType, m_reqNameType.size(), m_cached, uptime) == 0)
+		{
+			PELOG_LOG((PLV_VERBOSE, "Got answer from cache. %s\n", m_reqPrint.buf()));
+			int res = updateTtl(m_cached, uptime, now);
+			if (uptime != now && res >= 0)	// should update ttl in cache
+				m_ahosts->m_cache.set(m_reqNameType, m_reqNameType.size(), m_cached.buf(), m_cached.size());
+			if (res == 0)	// cache valid, send back directly without recursing
+			{
+				PELOG_LOG((PLV_VERBOSE, "Cache valid. %s\n", m_reqPrint.buf()));
+				return serverComplete(NULL, m_cached);
+			}
+			else
+				PELOG_LOG((PLV_VERBOSE, "Cache expired. %s\n", m_reqPrint.buf()));
+		}
+	}
+
+	// TODO: call handler
+
+	// recompress message after handler
+	codecMessage(true, dcompreq, m_request);
+	//PELOG_LOG((PLV_DEBUG, "Recompressed request(" PL_SIZET "):\n", m_request.size()));
+	//dumpMessage(m_request);
+	// send to upstream servers
+	m_start = boost::posix_time::microsec_clock::local_time();
 	m_status = JOB_REQUESTING;
 	const static asio::ip::udp::endpoint serverconf[] = {
-		asio::ip::udp::endpoint(asio::ip::address::from_string("208.67.222.222"), 53),
+		asio::ip::udp::endpoint(asio::ip::address::from_string("223.5.5.5"), 53),
 		//asio::ip::udp::endpoint(asio::ip::address::from_string("208.67.220.220"), 53),
 	};
 	for (size_t i = 0; i < sizeof(serverconf) / sizeof(serverconf[0]); ++i)
@@ -150,28 +178,36 @@ int AHostsJob::clientComplete(DnsClient *client)
 int AHostsJob::serverComplete(DnsServer *server, aulddays::abuf<char> &response)
 {
 	// remove server
-	auto iserver = m_server.find(server);
-	if (iserver == m_server.end())
-		PELOG_ERROR_RETURN((PLV_ERROR, "Invalid server ptr\n"), 1);
+	if (server != NULL)
+	{
+		auto iserver = m_server.find(server);
+		if (iserver == m_server.end())
+			PELOG_ERROR_RETURN((PLV_ERROR, "Invalid server ptr\n"), 1);
+		m_server.erase(iserver);
+		m_finished.push_back(server);
+	}
 	PELOG_LOG((PLV_VERBOSE, "Server complete\n"));
-	m_server.erase(iserver);
-	m_finished.push_back(server);
 	// deal with the response
 	if (m_status < JOB_GOTANSWER)
 	{
 		if (response.size() > 0)
 		{
-			PELOG_LOG((PLV_DEBUG, "Dump response(" PL_SIZET "):\n", response.size()));
-			dumpMessage(response);
+			//PELOG_LOG((PLV_DEBUG, "Dump response(" PL_SIZET "):\n", response.size()));
+			//dumpMessage(response);
 			abuf<char> dcompresp;
 			codecMessage(false, response, dcompresp);
 			PELOG_LOG((PLV_DEBUG, "Decompressed response(" PL_SIZET "):\n", dcompresp.size()));
 			dumpMessage(dcompresp, false);
-			abuf<char> newresp;
-			codecMessage(true, dcompresp, newresp);
-			PELOG_LOG((PLV_DEBUG, "Recompressed response(" PL_SIZET "):\n", newresp.size()));
-			dumpMessage(newresp);
-			m_client->response(response);
+
+			// TODO: call handler
+
+			codecMessage(true, dcompresp, response);
+			//PELOG_LOG((PLV_DEBUG, "Recompressed response(" PL_SIZET "):\n", response.size()));
+			//dumpMessage(response);
+			if (server)	// write to cache, only when got from a real server (not cache)
+				m_ahosts->m_cache.set(m_reqNameType, m_reqNameType.size(), response.buf(), response.size());
+			if (m_status != JOB_EARLYRET)
+				m_client->response(response);
 			m_status = JOB_GOTANSWER;
 			if (m_server.size() > 0)	// cancel other server since we've got answer
 			{
@@ -196,6 +232,26 @@ int AHostsJob::serverComplete(DnsServer *server, aulddays::abuf<char> &response)
 int AHostsJob::heartBeat(const boost::posix_time::ptime &now)
 {
 	int ret = 0;
+	static const int EARLYRET_THRESHOLD = 1500;
+	if (m_status == JOB_REQUESTING)
+	{
+		int64_t passed = (now - m_start).total_milliseconds();
+		if (passed > EARLYRET_THRESHOLD || passed < (0 - EARLYRET_THRESHOLD))
+		{
+			// Some time has passed, if there is (expired) result in cache, return it
+			time_t uptime;
+			if (m_questionNum == 1 &&
+				m_ahosts->m_cache.get(m_reqNameType, m_reqNameType.size(), m_cached, uptime) == 0)
+			{
+				PELOG_LOG((PLV_INFO, "Early return %s %d:%d.\n",
+					m_reqPrint.buf(), int(passed), EARLYRET_THRESHOLD));
+				m_status = JOB_EARLYRET;
+				m_client->response(m_cached);
+			}
+			else
+				m_status = JOB_NOEARLYRET;
+		}
+	}
 	for (auto i = m_server.begin(); i != m_server.end(); ++i)
 		ret |= (*i)->heartBeat(now);
 	ret |= m_client->heartBeat(now);
@@ -329,7 +385,7 @@ int UdpServer::heartBeat(const boost::posix_time::ptime &now)
 // UdpClient
 UdpClient::UdpClient(const aulddays::abuf<char> &req, const asio::ip::udp::socket &socket, const asio::ip::udp::endpoint &remote,
 	AHostsJob *job, asio::io_service &ioService)
-	: DnsClient(job, ioService, 5000), m_socket(ioService, asio::ip::udp::v4()), m_remote(remote),
+	: DnsClient(job, ioService, 5000), m_req(req), m_socket(ioService, asio::ip::udp::v4()), m_remote(remote),
 	m_start(boost::posix_time::min_date_time), m_cancel(false)
 {
 	asio::error_code ec;
@@ -339,8 +395,12 @@ UdpClient::UdpClient(const aulddays::abuf<char> &req, const asio::ip::udp::socke
 	if (ec)
 		PELOG_LOG((PLV_ERROR, "Socket bind failed. %s\n", ec.message().c_str()));
 	m_id = ntohs(*(const uint16_t *)(const char *)req);
-	int res = m_job->request(req);
+}
+
+int UdpClient::run()
+{
 	m_status = CLIENT_WAITING;
+	return m_job->request(m_req);
 }
 
 int UdpClient::response(aulddays::abuf<char> &res)

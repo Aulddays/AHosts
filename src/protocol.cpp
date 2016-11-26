@@ -51,22 +51,26 @@ void name2pname(const char *str, size_t len, aulddays::abuf<char> &out)
 int pname2name(const char *str, aulddays::abuf<char> &out)
 {
 	size_t len = strlen(str);
-	out.resize(len + 2);	// 1 for first label length and 1 for last 0 label length
+	out.resize(len + (len ? 2 : 1));	// 1 for first label length and 1 for last 0 label length
 	const char *pin = str;
 	char *pout = out;
 	while (pin - str < (int)len)
 	{
 		const char *pend = strchr(pin, '.');
+		if (pend == pin)	// str == "." or sr == "xxx..yy", treat as end
+			break;
 		if (!pend)
 			pend = str + len;
-		if (pend - pin > 63 || pend == pin)	// max length for one label is 63
+		if (pend - pin > 63)	// max length for one label is 63
 			return -1;
 		*pout++ = pend - pin;	// length
 		while (pin < pend)
 			*pout++ = tolower(*pin++);
-		++pin;
+		if (*pin)
+			++pin;
 	}
-	*pout = 0;
+	*pout++ = 0;
+	out.resize(pout - out);
 	return 0;
 }
 
@@ -609,4 +613,114 @@ static int compressName(const abuf<char> &in, const unsigned char *&pin,
 	}
 	// pin or pout exceeds limit, something must be wrong
 	PELOG_ERROR_RETURN((PLV_ERROR, "Invalid name.\n"), -1);
+}
+
+// get first name type in first question, return total number of questions
+int getNameType(const abuf<char> &pkt, abuf<char> &nametype)
+{
+	if (pkt.size() < 12)
+		return -1;
+	int ret = (int)ntohs(*(const uint16_t *)(pkt.buf() + 4));
+	int namelen = getName(pkt + 12, pkt.size() - 12);
+	if (namelen < 0)
+		return -1;
+	nametype.resize(namelen + 2);
+	memcpy(nametype, pkt + 12, namelen + 2);
+	return ret;
+}
+
+// raw name-type to printable version
+int nametype2print(const abuf<char> &nametype, abuf<char> &pnametype)
+{
+	return nametype2print(nametype, nametype.size(), pnametype);
+}
+int nametype2print(const char *nametype, size_t nametypelen, abuf<char> &pnametype)
+{
+	pnametype.resize(nametypelen + 14);
+	name2pname(nametype, nametypelen - 2, pnametype);
+	size_t len = strlen(pnametype);
+	pnametype.resize(pnametype.capacity());
+	if (pnametype.size() < len + 12)
+		pnametype.resize(len + 12);
+	pnametype[len++] = ':';
+	uint16_t type = ntohs(*(const uint16_t *)(nametype + (nametypelen - 2)));
+	const char *ptype = type2name(type);
+	strncpy(pnametype + len, ptype, pnametype.size() - len);
+	pnametype[pnametype.size() - 1] = 0;
+	return 0;
+}
+
+// update TTLs in pkt (minus (now - uptime)).
+// return 0: not yet expired, 1: expired, -1: error
+int updateTtl(abuf<char> &pkt, time_t uptime, time_t now)
+{
+	int ret = 0;
+	time_t ttldiff = now > uptime ? now - uptime : 0;
+	const unsigned char *pos = (const unsigned char *)pkt.buf();
+	int qdc = (int)ntohs(*(const uint16_t *)(pos + 4));
+	int anc = (int)ntohs(*(const uint16_t *)(pos + 6));
+	int nsc = (int)ntohs(*(const uint16_t *)(pos + 8));
+	int arc = (int)ntohs(*(const uint16_t *)(pos + 10));
+	pos += 12;
+
+	// questions
+	for (int i = 0; i < qdc; ++i)
+	{
+		int nameptr = (const char *)pos - pkt;
+		int namel = getName((const char *)pos, pkt.size() - nameptr);
+		if (namel < 0)
+			PELOG_ERROR_RETURN((PLV_ERROR, "Invalid name.\n"), -1);
+		pos += namel;
+		if ((const char *)pos - pkt + 4 >(int)pkt.size())
+			PELOG_ERROR_RETURN((PLV_ERROR, "Incomplete rdata\n"), -1);
+		pos += 4;	// type and class
+	}
+
+	int *secnums[] = { &anc, &nsc, &arc };
+	for (size_t isec = 0; isec < sizeof(secnums) / sizeof(secnums[0]); ++isec)
+	{
+		for (int ient = 0; ient < *secnums[isec]; ++ient)
+		{
+			int nameptr = (const char *)pos - pkt;
+			int namel = getName((const char *)pos, pkt.size() - nameptr);
+			if (namel < 0)
+				PELOG_ERROR_RETURN((PLV_ERROR, "Invalid name.\n"), -1);
+			pos += namel;
+			if ((const char *)pos - pkt + 10 >(int)pkt.size())
+				PELOG_ERROR_RETURN((PLV_ERROR, "Incomplete rdata\n"), -1);
+			uint16_t rtype = ntohs(*(const uint16_t *)pos);
+			pos += 4;
+			const unsigned char *pttl = pos;	// for update ttl
+			uint32_t ttl = ntohl(*(const uint32_t *)pos);
+			// update ttl
+			if (rtype != RT_OPT)
+			{
+				if (ttl <= 1)	// already expired
+				{
+					if (isec == 0)	// only answer section expires the whole message
+						ret = 1;
+					ttl = 1;
+				}
+				else if (ttldiff > 0)
+				{
+					if (ttldiff >= ttl)	// expired
+					{
+						if (isec == 0)
+							ret = 1;
+						ttl = 1;
+					}
+					else
+						ttl -= (uint32_t)ttldiff;
+				}
+				*(uint32_t *)pos = htonl(ttl);	// update ttl
+			}
+			pos += 4;
+			uint16_t rlen = ntohs(*(const uint16_t *)pos);
+			pos += 2;
+			if ((const char *)pos - pkt + rlen > (int)pkt.size())
+				PELOG_ERROR_RETURN((PLV_ERROR, "Incomplete rdata\n"), -1);
+			pos += rlen;
+		}	// for each record
+	}	// for each section
+	return ret;
 }

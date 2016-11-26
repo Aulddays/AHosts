@@ -57,3 +57,14 @@ int pname2name(const char *str, aulddays::abuf<char> &out);
 int codecMessage(bool compress, const aulddays::abuf<char> &in, aulddays::abuf<char> &out);
 
 void dumpMessage(const aulddays::abuf<char> &pkt, bool dumpnameptr = true);
+
+// get first name type in first question, return total number of questions
+int getNameType(const abuf<char> &pkt, abuf<char> &nametype);
+
+// raw name-type to printable version
+int nametype2print(const char *nametype, size_t nametypelen, abuf<char> &pnametype);
+int nametype2print(const abuf<char> &nametype, abuf<char> &pnametype);
+
+// update TTLs in pkt (minus (now - uptime)).
+// return 0: not yet expired, 1: expired, -1: error
+int updateTtl(abuf<char> &pkt, time_t uptime, time_t now);

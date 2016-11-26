@@ -92,6 +92,7 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\AHostsCache.hpp" />
     <ClInclude Include="src\AHostsConf.hpp" />
     <ClInclude Include="src\AHosts.hpp" />
     <ClInclude Include="src\AHostsHandler.h" />

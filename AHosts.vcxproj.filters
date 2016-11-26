@@ -71,5 +71,8 @@
     <ClInclude Include="src\ah_memmem.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\AHostsCache.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
