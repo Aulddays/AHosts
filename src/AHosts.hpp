@@ -17,10 +17,10 @@ public:
 	DnsClient(AHostsJob *job, asio::io_service &ioService, unsigned int timeout)
 		: m_job(job), m_ioService(ioService), m_id(-1), m_timeout(timeout), m_status(CLIENT_BEGIN) {}
 	virtual ~DnsClient(){}
-	virtual int run() = 0;
 	virtual int response(aulddays::abuf<char> &res) = 0;
 	virtual int cancel() = 0;	// no response to client
 	virtual int heartBeat(const boost::posix_time::ptime &now) = 0;
+	bool responded() const { return m_status == CLIENT_RESPONDED; }
 protected:
 	AHostsJob *m_job;
 	asio::io_service &m_ioService;
@@ -65,8 +65,8 @@ class AHosts;
 class AHostsJob
 {
 public:
-	AHostsJob(AHosts *ahosts, asio::io_service &ioService,
-		const asio::ip::udp::socket &socket, const asio::ip::udp::endpoint &remote, const aulddays::abuf<char> &req);
+	AHostsJob(AHosts *ahosts, asio::io_service &ioService);
+	int runudp(const asio::ip::udp::socket &socket, const asio::ip::udp::endpoint &remote, const abuf<char> &req);
 	~AHostsJob()
 	{
 		delete m_client;
@@ -75,10 +75,11 @@ public:
 			delete *i;
 		m_finished.clear();
 	}
-	int clientComplete(DnsClient *client);
+	int clientComplete(DnsClient *client, bool ok = true);
 	int serverComplete(DnsServer *server, aulddays::abuf<char> &response);
 	int request(const aulddays::abuf<char> &req);	// called by client to send request
 	int heartBeat(const boost::posix_time::ptime &now);
+	void finished();	// dump log
 private:
 	AHosts *m_ahosts;
 	asio::io_service &m_ioService;
@@ -95,11 +96,20 @@ private:
 		JOB_GOTANSWER,	// got answer from some server
 		JOB_RESPONDED	// sent response to client
 	} m_status;	// client and server complete status
+	bool m_early;	// whether early return
+	enum
+	{
+		JOB_OK,
+		JOB_REQERROR,
+		JOB_TIMEOUT,
+		JOB_RESPERROR,
+		JOB_STNUM
+	} m_jobst;	// job finish status
 	abuf<char> m_reqNameType;	// name and type in the request. should contain '\0'!
 	abuf<char> m_reqPrint;	// Printable name:type of the request
 	int m_questionNum;	// number of question items in request
 	abuf<char> m_cached;
-	boost::posix_time::ptime m_start;
+	boost::posix_time::ptime m_tstart, m_tearly, m_tanswer, m_treply, m_tfin;
 };
 
 class AHosts
@@ -137,16 +147,14 @@ private:
 class UdpClient : public DnsClient
 {
 public:
-	UdpClient(const aulddays::abuf<char> &req, const asio::ip::udp::socket &socket, const asio::ip::udp::endpoint &remote,
-		AHostsJob *job, asio::io_service &ioService);
-	virtual int run();
+	UdpClient(AHostsJob *job, asio::io_service &ioService);
+	virtual int run(const abuf<char> &req, const asio::ip::udp::socket &socket, const asio::ip::udp::endpoint &remote);
 	virtual ~UdpClient(){ };
 	virtual int response(aulddays::abuf<char> &res);
 	void onResponsed(const asio::error_code& error, size_t size);
 	virtual int cancel();	// no response to client
 	virtual int heartBeat(const boost::posix_time::ptime &now);
 private:
-	const aulddays::abuf<char> &m_req;
 	asio::ip::udp::socket m_socket;
 	asio::ip::udp::endpoint m_remote;
 	boost::posix_time::ptime m_start;

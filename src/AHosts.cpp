@@ -61,7 +61,9 @@ void AHosts::onUdpRequest(const asio::error_code& error, size_t size)
 	PELOG_LOG((PLV_VERBOSE, "Got request from %s:%d size " PL_SIZET "\n",
 		m_uRemote.address().to_string().c_str(), (int)m_uRemote.port(), size));
 	m_ucRecvBuf.resize(size);
-	m_jobs.insert(new AHostsJob(this, m_ioService, m_uSocket, m_uRemote, m_ucRecvBuf));
+	AHostsJob *job = new AHostsJob(this, m_ioService);
+	m_jobs.insert(job);
+	job->runudp(m_uSocket, m_uRemote, m_ucRecvBuf);
 	if (listenUdp())
 		PELOG_ERROR_RETURNVOID((PLV_ERROR, "UDP listening failed.\n"));
 }
@@ -96,14 +98,25 @@ void AHosts::onHeartbeat(const asio::error_code& error)
 
 // AHostsJob
 
-AHostsJob::AHostsJob(AHosts *ahosts, asio::io_service &ioService,
-	const asio::ip::udp::socket &socket, const asio::ip::udp::endpoint &remote, const aulddays::abuf<char> &req)
-	: m_ahosts(ahosts), m_ioService(ioService), m_status(JOB_BEGIN), m_questionNum(-1)
+AHostsJob::AHostsJob(AHosts *ahosts, asio::io_service &ioService)
+	: m_ahosts(ahosts), m_ioService(ioService), m_client(NULL), m_status(JOB_BEGIN),
+	m_early(false), m_jobst(JOB_OK), m_questionNum(-1)
 {
 	//m_server = new UdpServer(this, m_ioService);
-	m_client = new UdpClient(req, socket, remote, this, m_ioService);
-	m_client->run();
+	m_tstart = m_tearly = m_tanswer = m_treply = m_tfin = boost::posix_time::microsec_clock::local_time();
 	//m_server->setClient(m_client);
+}
+
+int AHostsJob::runudp(const asio::ip::udp::socket &socket, const asio::ip::udp::endpoint &remote, const abuf<char> &req)
+{
+	m_client = new UdpClient(this, m_ioService);
+	if (int ret = ((UdpClient *)m_client)->run(req, socket, remote))
+	{
+		m_jobst = JOB_REQERROR;
+		m_ahosts->jobComplete(this);
+		return ret;
+	}
+	return 0;
 }
 
 int AHostsJob::request(const aulddays::abuf<char> &req)
@@ -112,7 +125,7 @@ int AHostsJob::request(const aulddays::abuf<char> &req)
 	//dumpMessage(req);
 	// decompress message
 	abuf<char> dcompreq;
-	codecMessage(false, req, dcompreq);
+	int res = codecMessage(false, req, dcompreq);
 	PELOG_LOG((PLV_DEBUG, "Decompressed request(" PL_SIZET "):\n", dcompreq.size()));
 	dumpMessage(dcompreq, false);
 
@@ -146,7 +159,6 @@ int AHostsJob::request(const aulddays::abuf<char> &req)
 	//PELOG_LOG((PLV_DEBUG, "Recompressed request(" PL_SIZET "):\n", m_request.size()));
 	//dumpMessage(m_request);
 	// send to upstream servers
-	m_start = boost::posix_time::microsec_clock::local_time();
 	m_status = JOB_REQUESTING;
 	const static asio::ip::udp::endpoint serverconf[] = {
 		asio::ip::udp::endpoint(asio::ip::address::from_string("223.5.5.5"), 53),
@@ -161,13 +173,26 @@ int AHostsJob::request(const aulddays::abuf<char> &req)
 	return 0;
 }
 
-int AHostsJob::clientComplete(DnsClient *client)
+int AHostsJob::clientComplete(DnsClient *client, bool ok)
 {
 	if (client != m_client)
-		PELOG_ERROR_RETURN((PLV_ERROR, "Invalid client ptr\n"), 1);
-	if (m_status != JOB_GOTANSWER)
-		PELOG_ERROR_RETURN((PLV_ERROR, "Invalid job status %d\n", m_status), 1);
-	m_status = JOB_RESPONDED;
+	{
+		PELOG_LOG((PLV_ERROR, "Invalid client ptr\n"));
+		ok = false;
+	}
+	if (m_status != JOB_GOTANSWER && m_status != JOB_EARLYRET)
+	{
+		PELOG_LOG((PLV_ERROR, "Invalid job status %d\n", m_status));
+		m_status = JOB_GOTANSWER;
+		ok = false;
+	}
+	m_treply = boost::posix_time::microsec_clock::local_time();
+	// on early return, we do not change m_status, but serverComplete() has to
+	// check m_client()->responded() to determine client has finished
+	if (m_status != JOB_EARLYRET || m_server.size() == 0)
+		m_status = JOB_RESPONDED;
+	if (!ok)
+		m_jobst = JOB_RESPERROR;
 	PELOG_LOG((PLV_VERBOSE, "Client complete\n"));
 	if (m_server.size() == 0)	// client and server both completed
 		m_ahosts->jobComplete(this);
@@ -194,6 +219,7 @@ int AHostsJob::serverComplete(DnsServer *server, aulddays::abuf<char> &response)
 		{
 			//PELOG_LOG((PLV_DEBUG, "Dump response(" PL_SIZET "):\n", response.size()));
 			//dumpMessage(response);
+			m_tanswer = boost::posix_time::microsec_clock::local_time();
 			abuf<char> dcompresp;
 			codecMessage(false, response, dcompresp);
 			PELOG_LOG((PLV_DEBUG, "Decompressed response(" PL_SIZET "):\n", dcompresp.size()));
@@ -206,9 +232,10 @@ int AHostsJob::serverComplete(DnsServer *server, aulddays::abuf<char> &response)
 			//dumpMessage(response);
 			if (server)	// write to cache, only when got from a real server (not cache)
 				m_ahosts->m_cache.set(m_reqNameType, m_reqNameType.size(), response.buf(), response.size());
-			if (m_status != JOB_EARLYRET)
-				m_client->response(response);
+			int oldstatus = m_status;
 			m_status = JOB_GOTANSWER;
+			if (oldstatus != JOB_EARLYRET)
+				m_client->response(response);
 			if (m_server.size() > 0)	// cancel other server since we've got answer
 			{
 				PELOG_LOG((PLV_VERBOSE, "Canceling all pending servers\n"));
@@ -218,10 +245,15 @@ int AHostsJob::serverComplete(DnsServer *server, aulddays::abuf<char> &response)
 		}
 		else if (m_server.size() == 0)	// all server finished and no answer
 		{
+			m_tanswer = boost::posix_time::microsec_clock::local_time();
+			int oldstatus = m_status;
 			m_status = JOB_GOTANSWER;
-			m_client->cancel();
+			if (oldstatus != JOB_EARLYRET)
+				m_client->cancel();
 		}
 	}
+	if (m_status == JOB_GOTANSWER && m_client->responded())	// client early returned
+		m_status = JOB_RESPONDED;
 	if (m_server.size() == 0 && m_status == JOB_RESPONDED)
 	{
 		m_ahosts->jobComplete(this);
@@ -235,7 +267,7 @@ int AHostsJob::heartBeat(const boost::posix_time::ptime &now)
 	static const int EARLYRET_THRESHOLD = 1500;
 	if (m_status == JOB_REQUESTING)
 	{
-		int64_t passed = (now - m_start).total_milliseconds();
+		int64_t passed = (now - m_tstart).total_milliseconds();
 		if (passed > EARLYRET_THRESHOLD || passed < (0 - EARLYRET_THRESHOLD))
 		{
 			// Some time has passed, if there is (expired) result in cache, return it
@@ -246,6 +278,7 @@ int AHostsJob::heartBeat(const boost::posix_time::ptime &now)
 				PELOG_LOG((PLV_INFO, "Early return %s %d:%d.\n",
 					m_reqPrint.buf(), int(passed), EARLYRET_THRESHOLD));
 				m_status = JOB_EARLYRET;
+				m_tearly = boost::posix_time::microsec_clock::local_time();
 				m_client->response(m_cached);
 			}
 			else
@@ -383,24 +416,24 @@ int UdpServer::heartBeat(const boost::posix_time::ptime &now)
 }
 
 // UdpClient
-UdpClient::UdpClient(const aulddays::abuf<char> &req, const asio::ip::udp::socket &socket, const asio::ip::udp::endpoint &remote,
-	AHostsJob *job, asio::io_service &ioService)
-	: DnsClient(job, ioService, 5000), m_req(req), m_socket(ioService, asio::ip::udp::v4()), m_remote(remote),
+UdpClient::UdpClient(AHostsJob *job, asio::io_service &ioService)
+	: DnsClient(job, ioService, 5000), m_socket(ioService, asio::ip::udp::v4()),
 	m_start(boost::posix_time::min_date_time), m_cancel(false)
 {
+}
+
+int UdpClient::run(const abuf<char> &req, const asio::ip::udp::socket &socket, const asio::ip::udp::endpoint &remote)
+{
+	m_remote = remote;
 	asio::error_code ec;
 	asio::socket_base::reuse_address option(true);
 	m_socket.set_option(option);
 	m_socket.bind(asio::ip::udp::endpoint(socket.local_endpoint()), ec);
 	if (ec)
-		PELOG_LOG((PLV_ERROR, "Socket bind failed. %s\n", ec.message().c_str()));
+		PELOG_ERROR_RETURN((PLV_ERROR, "Socket bind failed. %s\n", ec.message().c_str()), -1);
 	m_id = ntohs(*(const uint16_t *)(const char *)req);
-}
-
-int UdpClient::run()
-{
 	m_status = CLIENT_WAITING;
-	return m_job->request(m_req);
+	return m_job->request(req);
 }
 
 int UdpClient::response(aulddays::abuf<char> &res)
@@ -430,7 +463,7 @@ void UdpClient::onResponsed(const asio::error_code& error, size_t size)
 	if (m_status != CLIENT_RESPONDING)
 		PELOG_ERROR_RETURNVOID((PLV_ERROR, "Client in invalid status %d\n", m_status));
 	m_status = CLIENT_RESPONDED;
-	m_job->clientComplete(this);
+	m_job->clientComplete(this, !error);
 }
 
 int UdpClient::cancel()
