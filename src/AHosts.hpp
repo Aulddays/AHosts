@@ -19,6 +19,7 @@ public:
 	virtual ~DnsClient(){}
 	virtual int response(aulddays::abuf<char> &res) = 0;
 	virtual int cancel() = 0;	// no response to client
+	// return: 0 ok, >0 timedout, <0 error
 	virtual int heartBeat(const boost::posix_time::ptime &now) = 0;
 	bool responded() const { return m_status == CLIENT_RESPONDED; }
 protected:
@@ -44,6 +45,7 @@ public:
 	//void setClient(DnsClient *client){ m_client = client; }
 	virtual int send(aulddays::abuf<char> &req) = 0;
 	virtual int cancel() = 0;
+	// return: 0 ok, >0 timedout, <0 error
 	virtual int heartBeat(const boost::posix_time::ptime &now) = 0;
 protected:
 	AHostsJob *m_job;
@@ -75,7 +77,8 @@ public:
 			delete *i;
 		m_finished.clear();
 	}
-	int clientComplete(DnsClient *client, bool ok = true);
+	// status: 0 ok. >0 not replied. <0 error
+	int clientComplete(DnsClient *client, int status = 0);
 	int serverComplete(DnsServer *server, aulddays::abuf<char> &response);
 	int request(const aulddays::abuf<char> &req);	// called by client to send request
 	int heartBeat(const boost::posix_time::ptime &now);
@@ -96,7 +99,7 @@ private:
 		JOB_GOTANSWER,	// got answer from some server
 		JOB_RESPONDED	// sent response to client
 	} m_status;	// client and server complete status
-	bool m_early;	// whether early return
+	//bool m_early;	// whether early return
 	enum
 	{
 		JOB_OK,
@@ -115,7 +118,7 @@ private:
 class AHosts
 {
 public:
-	AHosts() : m_cache(2), m_uSocket(m_ioService, asio::ip::udp::v4()), m_hbTimer(m_ioService){}
+	AHosts() : m_cache(), m_uSocket(m_ioService, asio::ip::udp::v4()), m_hbTimer(m_ioService){}
 	~AHosts(){}
 	int start();
 	int stop(){ m_ioService.stop(); return 0; }
