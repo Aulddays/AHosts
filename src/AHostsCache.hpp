@@ -28,11 +28,14 @@ public:
 		m_visit.clear();
 	}
 
-	int set(const char *key, size_t klen, const char *value, size_t vlen)
+	// ttl is merely a value to store in cache, actually cache expiration is caller's response
+	int set(const char *key, size_t klen, const char *value, size_t vlen, int32_t ttl)
 	{
+		if (m_maxsize == 0)	// cache disabled
+			return 0;
 		Key dkey = { klen, key };
 		auto idata = m_map.find(dkey);
-		Value dval = { 0, 0, NULL };
+		Value dval = { 0, 0, 0, NULL };
 #ifdef AHOSTS_CACHE_DEBUG
 		abuf<char> keydbg;
 		nametype2print(key, klen, keydbg);
@@ -80,13 +83,15 @@ public:
 			dval.len = vlen;
 		}
 		dval.uptime = time(NULL);
+		dval.ttl = ttl;
 		memcpy(dval.data, value, vlen);
 		m_visit.push_front(std::make_pair(dkey, dval));
 		// update map
 		m_map[dkey] = m_visit.begin();
 		return 0;
 	}
-	int get(const char *key, size_t klen, abuf<char> &value, time_t &uptime)
+	// ttl is merely a value stored in cache, actually cache expiration is caller's response
+	int get(const char *key, size_t klen, abuf<char> &value, time_t &uptime, int32_t &ttl)
 	{
 		Key dkey = { klen, key };
 		auto idata = m_map.find(dkey);
@@ -101,6 +106,7 @@ public:
 		// set return values
 		value.scopyFrom(dval.data, dval.len);
 		uptime = dval.uptime;
+		ttl = dval.ttl;
 		return 0;
 	}
 private:
@@ -127,6 +133,7 @@ private:
 	{
 		time_t uptime;
 		size_t len;
+		int32_t ttl;	// A value to store. does not affect cache expiration or replacement
 		char *data;
 	};
 	std::map<const Key, std::list<std::pair<const Key, Value> >::iterator> m_map;

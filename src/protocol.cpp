@@ -651,10 +651,10 @@ int nametype2print(const char *nametype, size_t nametypelen, abuf<char> &pnamety
 }
 
 // update TTLs in pkt (minus (now - uptime)).
-// return 0: not yet expired, 1: expired, -1: error
-int updateTtl(abuf<char> &pkt, time_t uptime, time_t now)
+// return TTL of whole pkt, -1: error
+int manageTtl(abuf<char> &pkt, time_t uptime, time_t now)
 {
-	int ret = 0;
+	int ret = INT_MAX;
 	time_t ttldiff = now > uptime ? now - uptime : 0;
 	const unsigned char *pos = (const unsigned char *)pkt.buf();
 	int qdc = (int)ntohs(*(const uint16_t *)(pos + 4));
@@ -697,21 +697,29 @@ int updateTtl(abuf<char> &pkt, time_t uptime, time_t now)
 			{
 				if (ttl <= 1)	// already expired
 				{
-					if (isec == 0)	// only answer section expires the whole message
-						ret = 1;
+					// answer section expires the whole message.
+					// and also a SOA record, if one is found (probably answer is not available)
+					if (isec == 0 || rtype == RT_SOA)
+						ret = 0;
 					ttl = 1;
 				}
 				else if (ttldiff > 0)
 				{
 					if (ttldiff >= ttl)	// expired
 					{
-						if (isec == 0)
-							ret = 1;
+						if (isec == 0 || rtype == RT_SOA)
+							ret = 0;
 						ttl = 1;
 					}
 					else
+					{
 						ttl -= (uint32_t)ttldiff;
+						if (isec == 0 || rtype == RT_SOA)
+							ret = std::min(ret, (int)ttl);
+					}
 				}
+				else if (isec == 0 || rtype == RT_SOA)
+					ret = std::min(ret, (int)ttl);
 				*(uint32_t *)pos = htonl(ttl);	// update ttl
 			}
 			pos += 4;
@@ -719,8 +727,23 @@ int updateTtl(abuf<char> &pkt, time_t uptime, time_t now)
 			pos += 2;
 			if ((const char *)pos - pkt + rlen > (int)pkt.size())
 				PELOG_ERROR_RETURN((PLV_ERROR, "Incomplete rdata\n"), -1);
+			// if SOA is found in authority section, probably answer is not available
+			// alse extract TTL from the rdata of SOA
+			if (isec == 1 && rtype == RT_SOA)
+			{
+				// format: name*2 + uint32*5. TTL is the last uint32, so just grab it at the end
+				ttl = ntohl(*(const uint32_t *)(pos + rlen - sizeof(uint32_t)));
+				ttl = std::min(ttl, (uint32_t)10800);	// suggested by RFC 2308
+				ret = std::min(ret, (int)ttl);
+			}
 			pos += rlen;
 		}	// for each record
 	}	// for each section
+	if (ret == INT_MAX)
+	{
+		PELOG_LOG((PLV_WARNING, "Could not get TTL from packet, default to 300\n"));
+		ret = 300;
+	}
+	PELOG_LOG((PLV_DEBUG, "Packet TTL %d\n", ret));
 	return ret;
 }

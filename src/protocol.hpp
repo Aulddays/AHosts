@@ -66,5 +66,5 @@ int nametype2print(const char *nametype, size_t nametypelen, abuf<char> &pnamety
 int nametype2print(const abuf<char> &nametype, abuf<char> &pnametype);
 
 // update TTLs in pkt (minus (now - uptime)).
-// return 0: not yet expired, 1: expired, -1: error
-int updateTtl(abuf<char> &pkt, time_t uptime, time_t now);
+// return TTL of whole pkt, -1: error
+int manageTtl(abuf<char> &pkt, time_t uptime, time_t now);

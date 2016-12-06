@@ -148,13 +148,18 @@ int AHostsJob::request(const aulddays::abuf<char> &req)
 		{
 			time_t uptime;
 			time_t now = time(NULL);
-			if(m_ahosts->m_cache.get(m_reqNameType, m_reqNameType.size(), m_cached, uptime) == 0)
+			int32_t ttl = 0;
+			if(m_ahosts->m_cache.get(m_reqNameType, m_reqNameType.size(), m_cached, uptime, ttl) == 0)
 			{
 				PELOG_LOG((PLV_VERBOSE, "Got answer from cache. %s\n", m_reqPrint.buf()));
-				int res = updateTtl(m_cached, uptime, now);
+				int res = manageTtl(m_cached, uptime, now);
 				if (uptime != now && res >= 0)	// should update ttl in cache
-					m_ahosts->m_cache.set(m_reqNameType, m_reqNameType.size(), m_cached.buf(), m_cached.size());
-				if (res == 0)	// cache valid, send back directly without recursing
+				{
+					time_t timediff = now > uptime ? now - uptime : uptime - now;
+					ttl = timediff >= ttl ? 0 : (int32_t)(ttl - timediff);
+					m_ahosts->m_cache.set(m_reqNameType, m_reqNameType.size(), m_cached.buf(), m_cached.size(), ttl);
+				}
+				if (res >= 0 && ttl > 0)	// cache valid, send back directly without recursing
 				{
 					PELOG_LOG((PLV_VERBOSE, "Cache valid. %s\n", m_reqPrint.buf()));
 					return serverComplete(NULL, m_cached);
@@ -174,9 +179,9 @@ int AHostsJob::request(const aulddays::abuf<char> &req)
 	// send to upstream servers
 	m_status = JOB_REQUESTING;
 	const static asio::ip::udp::endpoint serverconf[] = {
-		//asio::ip::udp::endpoint(asio::ip::address::from_string("223.5.5.5"), 53),
+		asio::ip::udp::endpoint(asio::ip::address::from_string("223.5.5.5"), 53),
 		//asio::ip::udp::endpoint(asio::ip::address::from_string("208.67.220.220"), 53),
-		asio::ip::udp::endpoint(asio::ip::address::from_string("8.8.8.8"), 53),
+		//asio::ip::udp::endpoint(asio::ip::address::from_string("8.8.8.8"), 53),
 	};
 	for (size_t i = 0; i < sizeof(serverconf) / sizeof(serverconf[0]); ++i)
 	{
@@ -253,7 +258,10 @@ int AHostsJob::serverComplete(DnsServer *server, aulddays::abuf<char> &response)
 				//PELOG_LOG((PLV_DEBUG, "Recompressed response(" PL_SIZET "):\n", response.size()));
 				//dumpMessage(response);
 				if (server)	// write to cache, only when got from a real server (not cache)
-					m_ahosts->m_cache.set(m_reqNameType, m_reqNameType.size(), response.buf(), response.size());
+				{
+					int ttl = manageTtl(response, 0, 0);
+					m_ahosts->m_cache.set(m_reqNameType, m_reqNameType.size(), response.buf(), response.size(), ttl);
+				}
 			}
 			int oldstatus = m_status;
 			m_status = JOB_GOTANSWER;
@@ -295,8 +303,9 @@ int AHostsJob::heartBeat(const boost::posix_time::ptime &now)
 		{
 			// Some time has passed, if there is (expired) result in cache, return it
 			time_t uptime;
+			int32_t ttl = 0;
 			if (m_questionNum == 1 &&
-				m_ahosts->m_cache.get(m_reqNameType, m_reqNameType.size(), m_cached, uptime) == 0)
+				m_ahosts->m_cache.get(m_reqNameType, m_reqNameType.size(), m_cached, uptime, ttl) == 0)
 			{
 				PELOG_LOG((PLV_INFO, "Early return %s %d:%d.\n",
 					m_reqPrint.buf(), int(passed), EARLYRET_THRESHOLD));
