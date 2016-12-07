@@ -161,7 +161,7 @@ int AHostsJob::request(const aulddays::abuf<char> &req)
 				}
 				if (res >= 0 && ttl > 0)	// cache valid, send back directly without recursing
 				{
-					PELOG_LOG((PLV_VERBOSE, "Cache valid. %s\n", m_reqPrint.buf()));
+					PELOG_LOG((PLV_VERBOSE, "Cache valid. %s TTL %d\n", m_reqPrint.buf(), (int)ttl));
 					return serverComplete(NULL, m_cached);
 				}
 				else
