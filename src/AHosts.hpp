@@ -120,6 +120,7 @@ class AHosts
 public:
 	AHosts() : m_cache(), m_uSocket(m_ioService, asio::ip::udp::v4()), m_hbTimer(m_ioService){}
 	~AHosts(){}
+	int init(const char *conffile){ return m_conf.load(conffile); }
 	int start();
 	int stop(){ m_ioService.stop(); return 0; }
 	int jobComplete(AHostsJob *job);

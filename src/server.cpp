@@ -47,6 +47,14 @@ int main(int argc, char* argv[])
 	_CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
 #endif
 
+	// conf
+	const char *conffile = argc >= 2 ? argv[1] : "AHosts.conf";
+	if (argc == 1)
+		PELOG_LOG((PLV_WARNING, "Usage: %s [confi_file]\n", argv[0]));
+	PELOG_LOG((PLV_INFO, "Using config file %s.\n", conffile));
+	if (int res = ahosts.init(conffile))
+		PELOG_ERROR_RETURN((PLV_ERROR, "Init failed.\n"), res);
+
 #ifdef _WIN32
 	SetConsoleCtrlHandler(sighdl, TRUE);
 #else

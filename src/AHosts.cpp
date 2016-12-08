@@ -27,8 +27,8 @@ boost::mt19937 AHostsRand((uint32_t)time(NULL) + _getpid());
 int AHosts::start()
 {
 	// load conf
-	if (int res = m_conf.load())
-		PELOG_ERROR_RETURN((PLV_ERROR, "Load conf failed.\n"), res);
+	if (!m_conf.m_loaded)
+		PELOG_ERROR_RETURN((PLV_ERROR, "No conf loaded.\n"), -1);
 
 	// start receive
 	asio::error_code ec;
