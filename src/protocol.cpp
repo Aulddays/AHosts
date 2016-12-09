@@ -38,7 +38,7 @@ void name2pname(const char *str, size_t len, aulddays::abuf<char> &out)
 	if ((*(const unsigned char *)str >> 6) == 3)
 	{
 		int pointer = ntohs(*(const uint16_t *)str) & 0x3fff;
-		_snprintf_s(out + pos - 1, 8, _TRUNCATE, "(*%d)", pointer);
+		snprintf(out + pos - 1, 8, "(*%d)", pointer);
 	}
 	else
 		out[pos - 1] = 0;
@@ -289,32 +289,36 @@ static const size_t RdataFieldSize[] =
 	16,	// RDATA_IPV6,  
 };
 BOOST_STATIC_ASSERT(sizeof(RdataFieldSize) / sizeof(RdataFieldSize[0]) == RDATA_SIZEMAX + 1);
+typedef std::vector<RdataFields> RdataList;
 // RDATA field list for each type
-static const std::map<uint16_t, std::vector<RdataFields> > rdfmt = boost::assign::map_list_of
-	(RT_A, boost::assign::list_of(RDATA_IP))
-	(RT_NS, boost::assign::list_of(RDATA_NAME))
-	(RT_MD, boost::assign::list_of(RDATA_RNAME))
-	(RT_MF, boost::assign::list_of(RDATA_RNAME))
-	(RT_CNAME, boost::assign::list_of(RDATA_NAME))
-	(RT_SOA, boost::assign::list_of(RDATA_NAME)(RDATA_NAME)(RDATA_UINT32)(RDATA_UINT32)(RDATA_UINT32)(RDATA_UINT32)(RDATA_UINT32))
-	(RT_MB, boost::assign::list_of(RDATA_RNAME))
-	(RT_MG, boost::assign::list_of(RDATA_RNAME))
-	(RT_MR, boost::assign::list_of(RDATA_RNAME))
-	(RT_NULL, boost::assign::list_of(RDATA_DUMPHEX))
-	(RT_WKS, boost::assign::list_of(RDATA_IP)(RDATA_UINT8)(RDATA_DUMPHEX))
-	(RT_PTR, boost::assign::list_of(RDATA_NAME))
-	(RT_HINFO, boost::assign::list_of(RDATA_STRING)(RDATA_STRING))
-	(RT_MINFO, boost::assign::list_of(RDATA_RNAME)(RDATA_RNAME))
-	(RT_MX, boost::assign::list_of(RDATA_UINT16)(RDATA_NAME))
-	(RT_TXT, boost::assign::list_of(RDATA_TXT))
-	(RT_RP, boost::assign::list_of(RDATA_RNAME)(RDATA_RNAME))
-	(RT_AFSDB, boost::assign::list_of(RDATA_UINT16)(RDATA_RNAME))
-	(RT_X25, boost::assign::list_of(RDATA_STRING))
-	(RT_ISDN, boost::assign::list_of(RDATA_DUMPHEX))
-	(RT_RT, boost::assign::list_of(RDATA_UINT16)(RDATA_RNAME))
-	(RT_AAAA, boost::assign::list_of(RDATA_IPV6))
-	(RT_SRV, boost::assign::list_of(RDATA_UINT16)(RDATA_UINT16)(RDATA_UINT16)(RDATA_RNAME))
-	(RT_OPT, boost::assign::list_of(RDATA_DUMPHEX));
+// boost::assign::list_of would fail on vector in C++11, in which vectors' constructor
+// take vector&& and size_t are equally good, and so ambiguity is compalined.
+// the convert_to_container<RdataList>() is a workaround for this.
+static const std::map<uint16_t, RdataList> rdfmt = boost::assign::map_list_of
+	(RT_A, boost::assign::list_of(RDATA_IP).convert_to_container<RdataList>())
+	(RT_NS, boost::assign::list_of(RDATA_NAME).convert_to_container<RdataList>())
+	(RT_MD, boost::assign::list_of(RDATA_RNAME).convert_to_container<RdataList>())
+	(RT_MF, boost::assign::list_of(RDATA_RNAME).convert_to_container<RdataList>())
+	(RT_CNAME, boost::assign::list_of(RDATA_NAME).convert_to_container<RdataList>())
+	(RT_SOA, boost::assign::list_of(RDATA_NAME)(RDATA_NAME)(RDATA_UINT32)(RDATA_UINT32)(RDATA_UINT32)(RDATA_UINT32)(RDATA_UINT32).convert_to_container<RdataList>())
+	(RT_MB, boost::assign::list_of(RDATA_RNAME).convert_to_container<RdataList>())
+	(RT_MG, boost::assign::list_of(RDATA_RNAME).convert_to_container<RdataList>())
+	(RT_MR, boost::assign::list_of(RDATA_RNAME).convert_to_container<RdataList>())
+	(RT_NULL, boost::assign::list_of(RDATA_DUMPHEX).convert_to_container<RdataList>())
+	(RT_WKS, boost::assign::list_of(RDATA_IP)(RDATA_UINT8)(RDATA_DUMPHEX).convert_to_container<RdataList>())
+	(RT_PTR, boost::assign::list_of(RDATA_NAME).convert_to_container<RdataList>())
+	(RT_HINFO, boost::assign::list_of(RDATA_STRING)(RDATA_STRING).convert_to_container<RdataList>())
+	(RT_MINFO, boost::assign::list_of(RDATA_RNAME)(RDATA_RNAME).convert_to_container<RdataList>())
+	(RT_MX, boost::assign::list_of(RDATA_UINT16)(RDATA_NAME).convert_to_container<RdataList>())
+	(RT_TXT, boost::assign::list_of(RDATA_TXT).convert_to_container<RdataList>())
+	(RT_RP, boost::assign::list_of(RDATA_RNAME)(RDATA_RNAME).convert_to_container<RdataList>())
+	(RT_AFSDB, boost::assign::list_of(RDATA_UINT16)(RDATA_RNAME).convert_to_container<RdataList>())
+	(RT_X25, boost::assign::list_of(RDATA_STRING).convert_to_container<RdataList>())
+	(RT_ISDN, boost::assign::list_of(RDATA_DUMPHEX).convert_to_container<RdataList>())
+	(RT_RT, boost::assign::list_of(RDATA_UINT16)(RDATA_RNAME).convert_to_container<RdataList>())
+	(RT_AAAA, boost::assign::list_of(RDATA_IPV6).convert_to_container<RdataList>())
+	(RT_SRV, boost::assign::list_of(RDATA_UINT16)(RDATA_UINT16)(RDATA_UINT16)(RDATA_RNAME).convert_to_container<RdataList>())
+	(RT_OPT, boost::assign::list_of(RDATA_DUMPHEX).convert_to_container<RdataList>());
 // For all non-common types, just treat them as raw bytes.
 // Actually only types with RDATA_NAME fields must be taken special care of (since they may be compressed)
 // Those without a RDATA_NAME that are in rdfmt are only for prettier dump
@@ -690,7 +694,6 @@ int manageTtl(abuf<char> &pkt, time_t uptime, time_t now)
 				PELOG_ERROR_RETURN((PLV_ERROR, "Incomplete rdata\n"), -1);
 			uint16_t rtype = ntohs(*(const uint16_t *)pos);
 			pos += 4;
-			const unsigned char *pttl = pos;	// for update ttl
 			uint32_t ttl = ntohl(*(const uint32_t *)pos);
 			// update ttl
 			if (rtype != RT_OPT)

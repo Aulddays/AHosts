@@ -12,7 +12,11 @@
 #	endif
 #endif  // _DEBUG
 
-boost::mt19937 AHostsRand((uint32_t)time(NULL) + _getpid());
+#ifdef _MSC_VER
+#	define getpid _getpid
+#endif
+
+boost::mt19937 AHostsRand((uint32_t)time(NULL) + getpid());
 
 // AHosts
 //AHosts::AHosts()
@@ -412,7 +416,11 @@ void UdpServer::onReqSent(const asio::error_code& error, size_t size)
 
 void UdpServer::onResponse(const asio::error_code& error, size_t size)
 {
+#ifdef _MSC_VER
 	if (error && !m_cancel && m_res.size() == 0 && error.value() == ERROR_MORE_DATA)	// peek result
+#else
+	if (!error && !m_cancel && m_res.size() == 0)	// peek result. TODO: the Linux behavior is yet to be verified
+#endif
 	{
 		m_res.resize(m_socket.available());
 		PELOG_LOG((PLV_DEBUG, "Response size from server " PL_SIZET "\n", m_res.size()));

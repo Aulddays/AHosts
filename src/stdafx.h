@@ -3,17 +3,21 @@
 // are changed infrequently
 //
 
-#pragma once
+#ifndef _AHOSTS_SRC_STDAFX_H_	// gcc complains #pragma once on .h files, so use this guard
+#define _AHOSTS_SRC_STDAFX_H_
 
+#if defined(_MSC_VER)
 
 #include "targetver.h"
 
 #define _CRT_SECURE_NO_WARNINGS
 
-#if defined(_DEBUG) && defined(_MSC_VER)
+#if defined(_DEBUG)
 #	define _CRTDBG_MAP_ALLOC
 #	include <crtdbg.h>
-#endif
+#endif	// if defined(_DEBUG)
+
+#endif // if defined(_MSC_VER)
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -25,4 +29,10 @@ using namespace aulddays;
 #include "pe_log.h"
 //#include "protocol.hpp"
 
-// TODO: reference additional headers your program requires here
+// WARNING: _snprintf_s on Windows has different return value than snprintf of C99
+// so they are actually not identical
+#ifdef _MSC_VER
+#	define snprintf(str, size, fmt, ...) _snprintf_s((str), (size), _TRUNCATE, (fmt), __VA_ARGS__)
+#endif
+
+#endif

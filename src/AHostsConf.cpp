@@ -2,6 +2,10 @@
 #include <boost/property_tree/info_parser.hpp>
 #include "AHostsConf.hpp"
 
+#ifdef _MSC_VER
+#	define strtok_r strtok_s
+#endif
+
 static void strsplit(std::string str, char deli, std::vector<std::string> &parts)
 {
 	parts.clear();
@@ -86,7 +90,7 @@ int AHostsConf::load(const char *conffile)
 				*pos = 0;
 			// find key
 			std::string key = "";
-			pos = strtok_s(line, " \t\r\n", &contex);
+			pos = strtok_r(line, " \t\r\n", &contex);
 			do
 			{
 				if (!pos)
@@ -95,11 +99,11 @@ int AHostsConf::load(const char *conffile)
 					continue;
 				key = pos;
 				break;
-			} while (pos = strtok_s(NULL, " \t\r\n", &contex));
+			} while (pos = strtok_r(NULL, " \t\r\n", &contex));
 			if (key == "")
 				continue;
 			// read values
-			while (pos = strtok_s(NULL, " \t\r\n", &contex))
+			while (pos = strtok_r(NULL, " \t\r\n", &contex))
 			{
 				if (!*pos)
 					continue;
@@ -113,7 +117,7 @@ int AHostsConf::load(const char *conffile)
 					m_hosts[key][RT_AAAA].push_back(pos);
 			}
 			// check validity
-			bool invalid = false;
+			//bool invalid = false;
 			if (m_hosts[key].find(RT_CNAME) != m_hosts[key].end())
 			{
 				if (m_hosts[key][RT_CNAME].size() > 1)
