@@ -38,7 +38,7 @@ int AHosts::start()
 	asio::error_code ec;
 	asio::socket_base::reuse_address option(true);
 	m_uSocket.set_option(option);
-	if (m_uSocket.bind(asio::ip::udp::endpoint(asio::ip::udp::v4(), 8453), ec))
+	if (m_uSocket.bind(asio::ip::udp::endpoint(asio::ip::udp::v4(), m_conf.m_port), ec))
 		PELOG_ERROR_RETURN((PLV_ERROR, "UDP bind failed: %s\n", ec.message().c_str()), ec.value());
 	int res = 0;
 	if (res = listenUdp())
@@ -182,14 +182,9 @@ int AHostsJob::request(const aulddays::abuf<char> &req)
 	}
 	// send to upstream servers
 	m_status = JOB_REQUESTING;
-	const static asio::ip::udp::endpoint serverconf[] = {
-		asio::ip::udp::endpoint(asio::ip::address::from_string("223.5.5.5"), 53),
-		//asio::ip::udp::endpoint(asio::ip::address::from_string("208.67.220.220"), 53),
-		//asio::ip::udp::endpoint(asio::ip::address::from_string("8.8.8.8"), 53),
-	};
-	for (size_t i = 0; i < sizeof(serverconf) / sizeof(serverconf[0]); ++i)
+	for (auto i = m_ahosts->getConf().m_servers.begin(); i != m_ahosts->getConf().m_servers.end(); ++i)
 	{
-		UdpServer *server = new UdpServer(this, m_ioService, serverconf[i], 20000);
+		UdpServer *server = new UdpServer(this, m_ioService, *i, m_ahosts->getConf().m_timeout);
 		m_server.insert(server);
 		server->send(m_request);
 	}
@@ -299,11 +294,11 @@ int AHostsJob::serverComplete(DnsServer *server, aulddays::abuf<char> &response)
 int AHostsJob::heartBeat(const boost::posix_time::ptime &now)
 {
 	int ret = 0;
-	static const int EARLYRET_THRESHOLD = 1500;
 	if (m_status == JOB_REQUESTING)
 	{
 		int64_t passed = (now - m_tstart).total_milliseconds();
-		if (passed > EARLYRET_THRESHOLD || passed < (0 - EARLYRET_THRESHOLD))
+		int earlyTimeout = (int)m_ahosts->getConf().m_earlyTimeout;
+		if (earlyTimeout > 0 && (passed > earlyTimeout || passed < (0 - earlyTimeout)))
 		{
 			// Some time has passed, if there is (expired) result in cache, return it
 			time_t uptime;
@@ -312,7 +307,7 @@ int AHostsJob::heartBeat(const boost::posix_time::ptime &now)
 				m_ahosts->m_cache.get(m_reqNameType, m_reqNameType.size(), m_cached, uptime, ttl) == 0)
 			{
 				PELOG_LOG((PLV_INFO, "Early return %s %d:%d.\n",
-					m_reqPrint.buf(), int(passed), EARLYRET_THRESHOLD));
+					m_reqPrint.buf(), int(passed), earlyTimeout));
 				m_status = JOB_EARLYRET;
 				m_tearly = boost::posix_time::microsec_clock::local_time();
 				//m_early = true;

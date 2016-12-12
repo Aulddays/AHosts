@@ -17,6 +17,10 @@ public:
 
 	uint16_t m_port;
 	std::vector<asio::ip::udp::endpoint> m_servers;
+	size_t m_cacheSize;
+	unsigned int m_timeout;
+	unsigned int m_earlyTimeout;
+	std::string m_hostsFilename;
 	// hosts settings, host_name => { type => {[values]} }
 	std::map<std::string, std::map<int, std::vector<std::string> > > m_hosts;
 };

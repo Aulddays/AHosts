@@ -118,12 +118,20 @@ private:
 class AHosts
 {
 public:
-	AHosts() : m_cache(), m_uSocket(m_ioService, asio::ip::udp::v4()), m_hbTimer(m_ioService){}
+	AHosts() : m_conf(m_conf_underlay),
+		m_uSocket(m_ioService, asio::ip::udp::v4()), m_hbTimer(m_ioService){}
 	~AHosts(){}
-	int init(const char *conffile){ return m_conf.load(conffile); }
+	int init(const char *conffile)
+	{ 
+		if (int ret = m_conf_underlay.load(conffile))
+			return ret;
+		m_cache.setCapacity(m_conf.m_cacheSize);
+		return 0;
+	}
 	int start();
 	int stop(){ m_ioService.stop(); return 0; }
 	int jobComplete(AHostsJob *job);
+	const AHostsConf &getConf() const { return m_conf; }
 
 	// cache
 	AHostsCache m_cache;
@@ -133,7 +141,8 @@ private:
 
 	void onHeartbeat(const asio::error_code& error);
 
-	AHostsConf m_conf;
+	AHostsConf m_conf_underlay;
+	const AHostsConf &m_conf;	// A read-only reference of conf
 
 	asio::io_service m_ioService;
 	std::set<AHostsJob *> m_jobs;

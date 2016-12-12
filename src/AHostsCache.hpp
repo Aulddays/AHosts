@@ -16,17 +16,15 @@ using aulddays::abuf;
 class AHostsCache
 {
 public:
-	AHostsCache(size_t maxitems = 10000):m_maxsize(maxitems){}
-	~AHostsCache()
+	AHostsCache(size_t maxitems = 0):m_maxsize(maxitems){}
+	void setCapacity(size_t maxitems)
 	{
-		for (auto i = m_map.begin(); i != m_map.end(); ++i)
-		{
-			free((void *)i->first.data);
-			free(i->second->second.data);
-		}
-		m_map.clear();
-		m_visit.clear();
+		m_maxsize = maxitems;
+		if (m_maxsize == 0)
+			clear();
+		// if new_size < current_items, extra items will be freed on next set()
 	}
+	~AHostsCache()	{ clear(); }
 
 	// ttl is merely a value to store in cache, actually cache expiration is caller's response
 	int set(const char *key, size_t klen, const char *value, size_t vlen, int32_t ttl)
@@ -136,6 +134,16 @@ private:
 		int32_t ttl;	// A value to store. does not affect cache expiration or replacement
 		char *data;
 	};
+	void clear()
+	{
+		for (auto i = m_map.begin(); i != m_map.end(); ++i)
+		{
+			free((void *)i->first.data);
+			free(i->second->second.data);
+		}
+		m_map.clear();
+		m_visit.clear();
+	}
 	std::map<const Key, std::list<std::pair<const Key, Value> >::iterator> m_map;
 	std::list<std::pair<const Key, Value> > m_visit;
 	size_t m_maxsize;
