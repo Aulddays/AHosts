@@ -107,8 +107,8 @@ void AHosts::onHeartbeat(const asio::error_code& error)
 // AHostsJob
 
 AHostsJob::AHostsJob(AHosts *ahosts, asio::io_service &ioService)
-	: m_ahosts(ahosts), m_ioService(ioService), m_client(NULL), m_status(JOB_BEGIN),
-	m_jobst(JOB_OK), m_questionNum(-1)
+	: m_ahosts(ahosts), m_ioService(ioService), m_client(NULL), m_handler(&ahosts->getConf()),
+	m_status(JOB_BEGIN), m_jobst(JOB_OK), m_questionNum(-1)
 {
 	//m_server = new UdpServer(this, m_ioService);
 	m_tstart = m_tearly = m_tanswer = m_treply = m_tfin = boost::posix_time::microsec_clock::local_time();
@@ -117,7 +117,7 @@ AHostsJob::AHostsJob(AHosts *ahosts, asio::io_service &ioService)
 
 int AHostsJob::runudp(const asio::ip::udp::socket &socket, const asio::ip::udp::endpoint &remote, const abuf<char> &req)
 {
-	m_client = new UdpClient(this, m_ioService);
+	m_client = new UdpClient(this, m_ioService, m_ahosts->getConf().m_timeout);
 	if (int ret = ((UdpClient *)m_client)->run(req, socket, remote))
 	{
 		m_jobst = JOB_REQERROR;
@@ -174,6 +174,9 @@ int AHostsJob::request(const aulddays::abuf<char> &req)
 		}
 
 		// TODO: call handler
+		abuf<char> tmpreq;
+		tmpreq.scopyFrom(dcompreq);
+		int res = m_handler.processRequest(tmpreq);
 
 		// recompress message after handler
 		codecMessage(true, dcompreq, m_request);
@@ -480,8 +483,8 @@ int UdpServer::heartBeat(const boost::posix_time::ptime &now)
 }
 
 // UdpClient
-UdpClient::UdpClient(AHostsJob *job, asio::io_service &ioService)
-	: DnsClient(job, ioService, 5000), m_socket(ioService, asio::ip::udp::v4()),
+UdpClient::UdpClient(AHostsJob *job, asio::io_service &ioService, unsigned timeout)
+	: DnsClient(job, ioService, timeout), m_socket(ioService, asio::ip::udp::v4()),
 	m_start(boost::posix_time::min_date_time), m_cancel(false)
 {
 }

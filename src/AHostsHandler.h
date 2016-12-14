@@ -16,6 +16,8 @@ public:
 	// return: 0: success, other: failure
 	int processResponse(aulddays::abuf<char> &res);
 
+	static int loadHostsExt(const char *filename, AHostsConf *conf);
+
 private:
 	const AHostsConf *m_conf;
 	aulddays::abuf<char> m_oriNameType;	// original name and type requested

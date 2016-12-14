@@ -7,6 +7,7 @@
 #include "auto_buf.hpp"
 #include "AHostsConf.hpp"
 #include "AHostsCache.hpp"
+#include "AHostsHandler.h"
 
 extern boost::mt19937 AHostsRand;
 
@@ -90,6 +91,7 @@ private:
 	std::set<DnsServer *> m_server;	// running servers
 	std::vector<DnsServer *> m_finished;	// completed servers move from m_server to here
 	aulddays::abuf<char> m_request;
+	AHostsHandler m_handler;
 	enum
 	{
 		JOB_BEGIN,	// receiving request from client, only for tcp client
@@ -160,7 +162,7 @@ private:
 class UdpClient : public DnsClient
 {
 public:
-	UdpClient(AHostsJob *job, asio::io_service &ioService);
+	UdpClient(AHostsJob *job, asio::io_service &ioService, unsigned int timeout);
 	virtual int run(const abuf<char> &req, const asio::ip::udp::socket &socket, const asio::ip::udp::endpoint &remote);
 	virtual ~UdpClient(){ };
 	virtual int response(aulddays::abuf<char> &res);

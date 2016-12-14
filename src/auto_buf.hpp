@@ -286,6 +286,12 @@ public:
 		return _buf[n];
 	}
 
+	const T &operator [](int n) const
+	{
+		abuf_mem_check();
+		return _buf[n];
+	}
+
 	bool isNull() const
 	{
 		abuf_mem_check();
@@ -318,6 +324,19 @@ public:
 #endif
 		std::swap(_size, src._size);
 		std::swap(_capacity, src._capacity);
+	}
+
+	// operator <, callable if operator < is defined for T
+	bool operator <(const basic_abuf &r) const
+	{
+		for (size_t cur = 0; cur < _size && cur < r.size(); ++cur)
+		{
+			if (_buf[cur] < r[cur])
+				return true;
+			else if (r[cur] < _buf[cur])
+				return false;
+		}
+		return _size < r.size();
 	}
 };
 

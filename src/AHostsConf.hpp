@@ -22,6 +22,6 @@ public:
 	unsigned int m_earlyTimeout;
 	std::string m_hostsFilename;
 	// hosts settings, host_name => { type => {[values]} }
-	std::map<std::string, std::map<int, std::vector<std::string> > > m_hosts;
+	std::map<abuf<char>, std::map<int, std::vector<abuf<char> > > > m_hosts;
 };
 
