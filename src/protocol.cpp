@@ -189,6 +189,8 @@ void dumpMessage(const aulddays::abuf<char> &pkt, bool dumpnameptr)
 			}	// for each record
 		}
 	}	// for each section
+	if ((char *)pos - pkt.buf() < pkt.size())
+		PELOG_LOG((PLV_WARNING, "Garbage data beyond normal message\n"));
 }
 
 static int decompressName(const abuf<char> &in, const unsigned char *&pin,

@@ -8,8 +8,9 @@ public:
 	AHostsHandler(const AHostsConf *conf): m_conf(conf){};
 	~AHostsHandler(){};
 
-	// return: 0: success and recursive request is required
-	// return: 1: success and req now is final response and no recursive request needed
+	// return: 0: request not affected by handler
+	// return: 1: success and relay request is required
+	// return: 2: success and req now is final response and no relay request needed
 	// return: <0: failure
 	int processRequest(aulddays::abuf<char> &req);
 

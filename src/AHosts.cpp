@@ -177,6 +177,14 @@ int AHostsJob::request(const aulddays::abuf<char> &req)
 		abuf<char> tmpreq;
 		tmpreq.scopyFrom(dcompreq);
 		int res = m_handler.processRequest(tmpreq);
+		PELOG_LOG((PLV_DEBUG, "Handled request(" PL_SIZET "):\n", tmpreq.size()));
+		dumpMessage(tmpreq, false);
+		if (res == 2)	// handler gave final answer, reply to client
+		{
+			PELOG_LOG((PLV_INFO, "Got answer from hosts.ext.\n"));
+			codecMessage(true, tmpreq, m_cached);
+			return serverComplete(NULL, m_cached);
+		}
 
 		// recompress message after handler
 		codecMessage(true, dcompreq, m_request);

@@ -12,17 +12,14 @@ int AHostsHandler::processRequest(aulddays::abuf<char> &req)
 	m_oriNameType.resize(0);
 	m_append.resize(0);
 
-	abuf<char> dreq;
-	codecMessage(false, req, dreq);
-
 	// parse the header
-	if (dreq.size() < 12)
-		PELOG_ERROR_RETURN((PLV_ERROR, "Request too small " PL_SIZET "\n", dreq.size()), -1);
-	if (((unsigned char)dreq[2]) & 1)
+	if (req.size() < 12)
+		PELOG_ERROR_RETURN((PLV_ERROR, "Request too small " PL_SIZET "\n", req.size()), -1);
+	if ((((unsigned char)req[2]) >> 7) & 1)
 		PELOG_ERROR_RETURN((PLV_ERROR, "QR is bit is 1 (answer) in request\n"), -1);
-	if (((((unsigned char)dreq[2]) >> 1) & 0xf) != 0)
+	if (((((unsigned char)req[2]) >> 3) & 0xf) != 0)
 		PELOG_ERROR_RETURN((PLV_VERBOSE, "OPCODE is not 0 (query) in request. pass\n"), 0);
-	int qdcount = ntohs(*(uint16_t *)(dreq + 4));
+	int qdcount = ntohs(*(uint16_t *)(req + 4));
 	if (qdcount == 0)
 		PELOG_ERROR_RETURN((PLV_TRACE, "No question in query. pass\n"), 0);
 	if (qdcount > 1)
@@ -30,49 +27,83 @@ int AHostsHandler::processRequest(aulddays::abuf<char> &req)
 			qdcount), 0);
 	// now we should have and only 1 question record
 	// question format: qname, qtype, qclass
-	int qnamelen = getName(dreq + 12, dreq.size() - 12);
-	if (qnamelen <= 0 || dreq.size() < (12u + qnamelen + 2 + 2))	// head + qname + qtype + qclass
+	int qnamelen = getName(req + 12, req.size() - 12);
+	if (qnamelen <= 0 || req.size() < (12u + qnamelen + 2 + 2))	// head + qname + qtype + qclass
 		PELOG_ERROR_RETURN((PLV_WARNING, "Invalid name in question.\n"), 0);
-	aulddays::abuf<char> pqname;
-	name2pname(dreq + 12, qnamelen, pqname);
-	uint16_t qtype = htons(*(uint16_t *)(dreq + 12 + qnamelen));
-	uint16_t qclass = htons(*(uint16_t *)(dreq + 12 + qnamelen + 2));
-	PELOG_LOG((PLV_DEBUG, "request name %s type %d class %d", pqname.buf(), (int)qtype, (int)qclass));
+	aulddays::abuf<char> qname;
+	qname.scopyFrom(req + 12, qnamelen);
+	uint16_t qtype = ntohs(*(uint16_t *)(req + 12 + qnamelen));
+	uint16_t qclass = ntohs(*(uint16_t *)(req + 12 + qnamelen + 2));
 	if ((qtype != RT_A && qtype != RT_AAAA && qtype != RT_CNAME) || qclass != RC_IN)	// not interesting question
 		return 0;
 
-	// search for local settings
-	auto ihost = m_conf->m_hosts.find(pqname.buf());
-	if (ihost == m_conf->m_hosts.end())	// host name not in conf
-		return 0;
-	const std::map<int, std::vector<abuf<char> > > &hconf = ihost->second;
-	std::map<int, std::vector<abuf<char> > >::const_iterator itype;
-	if ((qtype == RT_A || qtype == RT_AAAA) &&
-		(itype = hconf.find(RT_CNAME)) != hconf.end())	// want A or AAAA and have cname
+	bool final = false;	// whether got final answer (no need to relay to upstream)
+	while (!final)
 	{
+		// search for local settings
+		auto ihost = m_conf->m_hosts.find(qname);
+		if (ihost == m_conf->m_hosts.end())	// host name not in conf
+			break;
+		const std::map<uint16_t, std::vector<abuf<char> > > &hconf = ihost->second;
+		std::map<uint16_t, std::vector<abuf<char> > >::const_iterator itype;
+		if ((itype = hconf.find(RT_CNAME)) == hconf.end())
+			itype = hconf.find(qtype);
+		else
+			assert(itype->second.size() == 1);
+		if (itype == hconf.end())
+			break;
 		// oriName, to recover the question, which we will modify
 		if (m_oriNameType.isNull())
-			m_oriNameType.scopyFrom((dreq + 12), qnamelen + 2);
-		// m_append, will be added to answers
-		m_appendNum++;
-		size_t appsize = qnamelen + 2 + 2 + 4 + 2 + itype->second[0].size() + 2;
-		if (m_append.capacity() < m_append.size() + appsize)
-			m_append.reserve(std::max((size_t)256, m_append.size() + m_append.size() / 2));
-		m_append.resize(m_append.size() + appsize);
-		char *pos = m_append + (m_append.size() - appsize);	// must resize() before get pos
-		memcpy(pos, dreq + 12, qnamelen); pos += qnamelen;	// name
-		*(uint16_t *)pos = htons(RT_CNAME); pos += 2;		// type
-		*(uint16_t *)pos = htons(RC_IN); pos += 2;		// class
-		*(uint32_t *)pos = htonl(3600); pos += 4;		// TTL
-		abuf<char> newqname;
-		pname2name(itype->second[0].buf(), newqname);	// TODO: should have checked return value on loading conf
-		*(uint16_t *)pos = htons(newqname.size()); pos += 2;		// rdata len
-		memcpy(pos, newqname.buf(), newqname.size()); pos += newqname.size();
-		m_append.resize(pos - m_append);
-		// modify question
-		//memmem();
+			m_oriNameType.scopyFrom(req + 12, qname.size() + 2);
+		for (auto ians = itype->second.begin(); ians != itype->second.end(); ++ians)
+		{
+			// m_append, will be added to answers
+			m_appendNum++;
+			size_t appsize = qname.size() + 2 + 2 + 4 + 2 + ians->size();
+			if (m_append.capacity() < m_append.size() + appsize)
+				m_append.reserve(std::max((size_t)256,
+				m_append.size() + std::max(appsize, m_append.size() / 2)));
+			m_append.resize(m_append.size() + appsize);
+			char *pos = m_append + (m_append.size() - appsize);	// must resize() before get pos
+			memcpy(pos, qname, qname.size()); pos += qname.size();	// name
+			*(uint16_t *)pos = htons(itype->first); pos += 2;		// type
+			*(uint16_t *)pos = htons(RC_IN); pos += 2;		// class
+			*(uint32_t *)pos = htonl(3600); pos += 4;		// TTL
+			*(uint16_t *)pos = htons(ians->size()); pos += 2;		// rdata len
+			memcpy(pos, ians->buf(), ians->size()); pos += ians->size();
+		}
+		if (itype->first == qtype || qtype == RT_ANY || !((unsigned char)req[2] & 1))	// req[2]: RD bit
+			final = true;
+		else
+			qname.scopyFrom(itype->second[0]);
 	}
-	return 0;
+	if (m_oriNameType.isNull())	// no answer found in hosts conf
+		return 0;
+	if (final)	// got final answer. make a response message
+	{
+		((unsigned char &)req[2]) |= 1 << 7;	// 1->QR
+		((unsigned char &)req[3]) &= 0xf0;	// 0->RCODE
+		if ((unsigned char)req[2] & 1)	// if RD, then RA
+			((unsigned char &)req[3]) |= 1 << 7;
+		*(uint16_t *)(req + 6) = htons(ntohs(*(uint16_t *)(req + 6)) + m_appendNum);	// ans count
+		size_t qend = 12 + m_oriNameType.size() + 2;
+		req.resize(req.size() + m_append.size());
+		memmove(req + qend + m_append.size(), req + qend, req.size() - m_append.size() - qend);
+		memcpy(req + qend, m_append.buf(), m_append.size());
+		return 2;
+	}
+	// no final answer, modify the question
+	int qlendelta = (int)qname.size() + 2 - (int)m_oriNameType.size();
+	if (qlendelta > 0)
+		req.resize((int)req.size() + qlendelta);
+	if (qlendelta != 0)
+		memmove(req.buf() + 12 + (int)m_oriNameType.size() - 2 + qlendelta, 
+			req.buf() + 12 + (int)m_oriNameType.size() - 2,
+			req.size() - 12 - m_oriNameType.size() + 2 - (qlendelta > 0 ? qlendelta : 0));
+	memcpy(req.buf() + 12, qname, qname.size());
+	if (qlendelta < 0)
+		req.resize((int)req.size() + qlendelta);
+	return 1;
 }
 
 int AHostsHandler::loadHostsExt(const char *filename, AHostsConf *conf)
