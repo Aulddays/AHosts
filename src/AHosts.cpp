@@ -143,7 +143,7 @@ int AHostsJob::request(const aulddays::abuf<char> &req)
 	else
 	{
 		PELOG_LOG((PLV_DEBUG, "Decompressed request(" PL_SIZET "):\n", dcompreq.size()));
-		dumpMessage(dcompreq, false);
+		dumpMessage(PLV_DEBUG, dcompreq, false);
 
 		// get request and check cache
 		m_questionNum = getNameType(dcompreq, m_reqNameType);
@@ -173,16 +173,13 @@ int AHostsJob::request(const aulddays::abuf<char> &req)
 			}
 		}
 
-		// TODO: call handler
-		abuf<char> tmpreq;
-		tmpreq.scopyFrom(dcompreq);
-		int res = m_handler.processRequest(tmpreq);
-		PELOG_LOG((PLV_DEBUG, "Handled request(" PL_SIZET "):\n", tmpreq.size()));
-		dumpMessage(tmpreq, false);
+		int res = m_handler.processRequest(dcompreq);
+		PELOG_LOG((PLV_DEBUG, "Handled request(" PL_SIZET "):\n", dcompreq.size()));
+		dumpMessage(PLV_DEBUG, dcompreq, false);
 		if (res == 2)	// handler gave final answer, reply to client
 		{
 			PELOG_LOG((PLV_INFO, "Got answer from hosts.ext.\n"));
-			codecMessage(true, tmpreq, m_cached);
+			codecMessage(true, dcompreq, m_cached);
 			return serverComplete(NULL, m_cached);
 		}
 
@@ -232,6 +229,7 @@ int AHostsJob::clientComplete(DnsClient *client, int status)
 
 int AHostsJob::serverComplete(DnsServer *server, aulddays::abuf<char> &response)
 {
+	bool fromServer = server != NULL;
 	// remove server
 	if (server != NULL)
 	{
@@ -260,10 +258,18 @@ int AHostsJob::serverComplete(DnsServer *server, aulddays::abuf<char> &response)
 			else
 			{
 				PELOG_LOG((PLV_DEBUG, "Decompressed response(" PL_SIZET "):\n", dcompresp.size()));
-				dumpMessage(dcompresp, false);
+				dumpMessage(PLV_DEBUG, dcompresp, false);
 
-				// TODO: call handler
-
+				if (fromServer)
+				{
+					if (m_handler.processResponse(dcompresp))
+						PELOG_LOG((PLV_WARNING, "Handle response failed.\n"));
+					else
+					{
+						PELOG_LOG((PLV_DEBUG, "Handled response(" PL_SIZET "):\n", dcompresp.size()));
+						dumpMessage(PLV_DEBUG, dcompresp, false);
+					}
+				}
 				codecMessage(true, dcompresp, response);
 				//PELOG_LOG((PLV_DEBUG, "Recompressed response(" PL_SIZET "):\n", response.size()));
 				//dumpMessage(response);

@@ -97,6 +97,45 @@ int pelog_printf(int level, const char *format, ...)
 	return ret;
 }
 
+int pelog_rawprintf(int level, const char *format, ...)
+{
+	va_list v;
+	if (level <= PLV_MINLEVEL || level >= PLV_MAXLEVEL)
+	{
+		pelog_printf(PLV_ERROR, "PELOG: Error log level %d\n", level);
+		return -1;
+	}
+	if (level < pelog_logLevel)
+		return 0;
+	int ret = 0;
+	{	// for lock_guard
+		boost::lock_guard<boost::mutex> lock(pelog_mutex);
+		FILE *out_stream = pelog_out_stream.get();
+		va_start(v, format);
+		ret = vfprintf(out_stream, format, v);
+		va_end(v);
+	}
+	return ret;
+}
+
+size_t PELOG_RAWWRITE(int level, const void *buf, size_t size, size_t count)
+{
+	if (level <= PLV_MINLEVEL || level >= PLV_MAXLEVEL)
+	{
+		pelog_printf(PLV_ERROR, "PELOG: Error log level %d\n", level);
+		return 0;
+	}
+	if (level < pelog_logLevel)
+		return count;
+	size_t ret = 0;
+	{	// for lock_guard
+		boost::lock_guard<boost::mutex> lock(pelog_mutex);
+		FILE *out_stream = pelog_out_stream.get();
+		ret = fwrite(buf, size, count, out_stream);
+	}
+	return ret;
+}
+
 int pelog_setlevel(int level, int *old_level)
 {
 	if(old_level)

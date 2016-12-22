@@ -18,6 +18,8 @@ enum
 #define PELOG_ERROR_RETURN(X, Y) do { PELOG_LOG(X); return Y; } while(0)
 #define PELOG_LOG_RETURN(X, Y) do { PELOG_LOG(X); return Y; } while(0)
 #define PELOG_ERROR_RETURNVOID(X) do { PELOG_LOG(X); return; } while(0)
+#define PELOG_RAWLOG(a) pelog_rawprintf a
+size_t PELOG_RAWWRITE(int level, const void *buf, size_t size, size_t count);
 
 // MSVC uses "%Iu" for size_t while gcc uses "%zu"
 #ifdef _MSC_VER
@@ -27,6 +29,7 @@ enum
 #endif
 
 int pelog_printf(int level, const char *format, ...);
+int pelog_rawprintf(int level, const char *format, ...);
 int pelog_setlevel(int level, int *old_level = NULL);
 int pelog_setlevel(const char *level, int *old_level = NULL);
 int pelog_setfile(const char *fileName);

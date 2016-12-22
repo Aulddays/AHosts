@@ -13,7 +13,7 @@ int AHostsHandler::processRequest(aulddays::abuf<char> &req)
 	m_append.resize(0);
 
 	// parse the header
-	if (req.size() < 12)
+	if (req.size() < 19)	// 12(head) + 3(name) + 4(type&class)
 		PELOG_ERROR_RETURN((PLV_ERROR, "Request too small " PL_SIZET "\n", req.size()), -1);
 	if ((((unsigned char)req[2]) >> 7) & 1)
 		PELOG_ERROR_RETURN((PLV_ERROR, "QR is bit is 1 (answer) in request\n"), -1);
@@ -104,6 +104,26 @@ int AHostsHandler::processRequest(aulddays::abuf<char> &req)
 	if (qlendelta < 0)
 		req.resize((int)req.size() + qlendelta);
 	return 1;
+}
+
+int AHostsHandler::processResponse(aulddays::abuf<char> &res)
+{
+	if (m_oriNameType.size() == 0 || m_append.size() == 0 || m_appendNum == 0)	// req not handled
+		return 0;
+	if (res.size() < 19 || ntohs(*(uint16_t *)(res + 4)) != 1)	// 12(head) + 3(name) + 4(type&class)
+		PELOG_ERROR_RETURN((PLV_ERROR, "Question does not match ori query\n"), -1);
+	*(uint16_t *)(res + 6) = htons(ntohs(*(uint16_t *)(res + 6)) + m_appendNum);	// ans count
+	int qnamelen = getName(res + 12, res.size() - 12);
+	if (qnamelen <= 0 || res.size() < (12u + qnamelen + 2 + 2))	// head + qname + qtype + qclass
+		PELOG_ERROR_RETURN((PLV_ERROR, "Invalid name in response question.\n"), -1);
+	size_t qend = 12 + qnamelen + 4;
+	size_t auadlen = res.size() - qend;
+	res.resize(res.size() + m_append.size() + m_oriNameType.size() - qnamelen - 2);
+	memmove(res + 12 + m_oriNameType.size() + 2 + m_append.size(), res + qend, auadlen);
+	memcpy(res + 12, m_oriNameType.buf(), m_oriNameType.size());
+	*(unsigned short *)(res + 12 + m_oriNameType.size()) = htons(RC_IN);
+	memcpy(res + 12 + m_oriNameType.size() + 2, m_append.buf(), m_append.size());
+	return 0;
 }
 
 int AHostsHandler::loadHostsExt(const char *filename, AHostsConf *conf)

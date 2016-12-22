@@ -5,7 +5,7 @@
 class AHostsHandler
 {
 public:
-	AHostsHandler(const AHostsConf *conf): m_conf(conf){};
+	AHostsHandler(const AHostsConf *conf) : m_conf(conf), m_appendNum(0) {}
 	~AHostsHandler(){};
 
 	// return: 0: request not affected by handler

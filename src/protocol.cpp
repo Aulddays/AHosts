@@ -100,25 +100,25 @@ const char *type2name(uint16_t type)
 // |                    ARCOUNT                    |
 // +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 
-static int dumpRdata(const char *begin, const char *pos, uint16_t rtype, int len, bool ptr);
-void dumpMessage(const aulddays::abuf<char> &pkt, bool dumpnameptr)
+static int dumpRdata(int level, const char *begin, const char *pos, uint16_t rtype, int len, bool ptr);
+void dumpMessage(int level, const aulddays::abuf<char> &pkt, bool dumpnameptr)
 {
 	const unsigned char *pos = (const unsigned char *)pkt.buf();
-	fprintf(stderr, "  ID: %d\n", (int)ntohs(*(const uint16_t *)pos));
-	fprintf(stderr, "  QR:%d OP:%d AA:%d TC:%d RD:%d RA:%d RCODE:%d\n",
+	PELOG_RAWLOG((level, "  ID: %d\n", (int)ntohs(*(const uint16_t *)pos)));
+	PELOG_RAWLOG((level, "  QR:%d OP:%d AA:%d TC:%d RD:%d RA:%d RCODE:%d\n",
 		(int)(pos[2] >> 7), (int)((pos[2] >> 3) & 0xf), (int)((pos[2] >> 2) & 1),
 		(int)((pos[2] >> 1) & 1), (int)(pos[2] & 1),
-		(int)(pos[3] >> 7), (int)(pos[3] & 0xf));
+		(int)(pos[3] >> 7), (int)(pos[3] & 0xf)));
 	int qdc = (int)ntohs(*(const uint16_t *)(pos + 4));
 	int anc = (int)ntohs(*(const uint16_t *)(pos + 6));
 	int nsc = (int)ntohs(*(const uint16_t *)(pos + 8));
 	int arc = (int)ntohs(*(const uint16_t *)(pos + 10));
-	fprintf(stderr, "  QUERY: %d, ANSWER: %d, AUTHORITY: %d, ADDITIONAL: %d\n",
-		qdc, anc, nsc, arc);
+	PELOG_RAWLOG((level, "  QUERY: %d, ANSWER: %d, AUTHORITY: %d, ADDITIONAL: %d\n",
+		qdc, anc, nsc, arc));
 	pos += 12;
 	if (qdc > 0)
 	{
-		fprintf(stderr, "  ;; QUESTION SECTION:\n");
+		PELOG_RAWLOG((level, "  ;; QUESTION SECTION:\n"));
 		for (int i = 0; i < qdc; ++i)
 		{
 			int nameptr = (const char *)pos - pkt;
@@ -135,10 +135,10 @@ void dumpMessage(const aulddays::abuf<char> &pkt, bool dumpnameptr)
 			uint16_t qclass = ntohs(*(const uint16_t *)pos);
 			pos += 2;
 			if (dumpnameptr)
-				fprintf(stderr, "  (%d)%s\t%s\t%s\n", nameptr, namebuf.buf(),
-					class2name(qclass), type2name(qtype));
+				PELOG_RAWLOG((level, "  (%d)%s\t%s\t%s\n", nameptr, namebuf.buf(),
+					class2name(qclass), type2name(qtype)));
 			else
-				fprintf(stderr, "  %s\t%s\t%s\n", namebuf.buf(), class2name(qclass), type2name(qtype));
+				PELOG_RAWLOG((level, "  %s\t%s\t%s\n", namebuf.buf(), class2name(qclass), type2name(qtype)));
 		}
 	}
 	int *secnums[] = {&anc, &nsc, &arc};
@@ -147,7 +147,7 @@ void dumpMessage(const aulddays::abuf<char> &pkt, bool dumpnameptr)
 	{
 		if (*secnums[isec] > 0)
 		{
-			fprintf(stderr, "  ;; %s SECTION:\n", secnames[isec]);
+			PELOG_RAWLOG((level, "  ;; %s SECTION:\n", secnames[isec]));
 			for (int ient = 0; ient < *secnums[isec]; ++ient)
 			{
 				int nameptr = (const char *)pos - pkt;
@@ -172,24 +172,24 @@ void dumpMessage(const aulddays::abuf<char> &pkt, bool dumpnameptr)
 					PELOG_ERROR_RETURNVOID((PLV_ERROR, "Incomplete rdata\n"));
 				if (rtype == RT_OPT)
 				{
-					fprintf(stderr, "  %s\tudp:%d, ERCODE:%d, VERSION:%d, DO:%d\t", type2name(rtype), (int)rclass,
-						(int)*pttl, (int)pttl[1], (int)(pttl[2] >> 7));
+					PELOG_RAWLOG((level, "  %s\tudp:%d, ERCODE:%d, VERSION:%d, DO:%d\t", type2name(rtype), (int)rclass,
+						(int)*pttl, (int)pttl[1], (int)(pttl[2] >> 7)));
 				}
 				else if (dumpnameptr)
-					fprintf(stderr, "  (%d)%s\t%d\t%s\t%s\t", nameptr, namebuf.buf(), ttl,
-						class2name(rclass), type2name(rtype));
+					PELOG_RAWLOG((level, "  (%d)%s\t%d\t%s\t%s\t", nameptr, namebuf.buf(), ttl,
+						class2name(rclass), type2name(rtype)));
 				else
-					fprintf(stderr, "  %s\t%d\t%s\t%s\t", namebuf.buf(), ttl,
-					class2name(rclass), type2name(rtype));
-				int res = dumpRdata(pkt, (const char *)pos, rtype, rlen, dumpnameptr);
-				fprintf(stderr, "\n");
+					PELOG_RAWLOG((level, "  %s\t%d\t%s\t%s\t", namebuf.buf(), ttl,
+						class2name(rclass), type2name(rtype)));
+				int res = dumpRdata(level, pkt, (const char *)pos, rtype, rlen, dumpnameptr);
+				PELOG_RAWLOG((level, "\n"));
 				if (res)
 					PELOG_ERROR_RETURNVOID((PLV_ERROR, "Invalid rdata\n"));
 				pos += rlen;
 			}	// for each record
 		}
 	}	// for each section
-	if ((char *)pos - pkt.buf() < pkt.size())
+	if ((char *)pos - pkt.buf() < (int)pkt.size())
 		PELOG_LOG((PLV_WARNING, "Garbage data beyond normal message\n"));
 }
 
@@ -326,7 +326,7 @@ static const std::map<uint16_t, RdataList> rdfmt = boost::assign::map_list_of
 // Those without a RDATA_NAME that are in rdfmt are only for prettier dump
 static const std::vector<RdataFields> hexdump = boost::assign::list_of(RDATA_UNKNOWN);
 
-static int dumpRdata(const char *begin, const char *str, uint16_t rtype, int len, bool ptr)
+static int dumpRdata(int level, const char *begin, const char *str, uint16_t rtype, int len, bool ptr)
 {
 	auto itype = rdfmt.find(rtype);
 	const std::vector<RdataFields> &fmt = itype != rdfmt.end() ? itype->second : hexdump;
@@ -346,9 +346,9 @@ static int dumpRdata(const char *begin, const char *str, uint16_t rtype, int len
 			abuf<char> namebuf;
 			name2pname((const char *)pos, namel, namebuf);
 			if (ptr && *fld == RDATA_NAME)
-				fprintf(stderr, "(%d)%s ", nameptr, namebuf.buf());
+				PELOG_RAWLOG((level, "(%d)%s ", nameptr, namebuf.buf()));
 			else
-				fprintf(stderr, "%s ", namebuf.buf());
+				PELOG_RAWLOG((level, "%s ", namebuf.buf()));
 			pos += namel;
 			break;
 		}
@@ -357,7 +357,7 @@ static int dumpRdata(const char *begin, const char *str, uint16_t rtype, int len
 			if (len - (pos - str) < 4)
 				PELOG_ERROR_RETURN((PLV_ERROR, "Invalid IP.\n"), -1);
 			const unsigned char *pip = (const unsigned char *)pos;
-			fprintf(stderr, "%d.%d.%d.%d ", (int)pip[0], (int)pip[1], (int)pip[2], (int)pip[3]);
+			PELOG_RAWLOG((level, "%d.%d.%d.%d ", (int)pip[0], (int)pip[1], (int)pip[2], (int)pip[3]));
 			pos += 4;
 			break;
 		}
@@ -368,7 +368,7 @@ static int dumpRdata(const char *begin, const char *str, uint16_t rtype, int len
 			asio::ip::address_v6::bytes_type ipbytes;
 			memcpy(ipbytes.data(), pos, 16);
 			asio::ip::address_v6 ip(ipbytes);
-			fprintf(stderr, "%s ", ip.to_string().c_str());
+			PELOG_RAWLOG((level, "%s ", ip.to_string().c_str()));
 			pos += 16;
 			break;
 		}
@@ -376,7 +376,7 @@ static int dumpRdata(const char *begin, const char *str, uint16_t rtype, int len
 		{
 			if (len - (pos - str) < 1)
 				PELOG_ERROR_RETURN((PLV_ERROR, "Invalid uint8.\n"), -1);
-			fprintf(stderr, "%d ", *(const uint8_t *)pos);
+			PELOG_RAWLOG((level, "%d ", *(const uint8_t *)pos));
 			++pos;
 			break;
 		}
@@ -384,7 +384,7 @@ static int dumpRdata(const char *begin, const char *str, uint16_t rtype, int len
 		{
 			if (len - (pos - str) < 2)
 				PELOG_ERROR_RETURN((PLV_ERROR, "Invalid uint16.\n"), -1);
-			fprintf(stderr, "%d ", ntohs(*(const uint16_t *)pos));
+			PELOG_RAWLOG((level, "%d ", ntohs(*(const uint16_t *)pos)));
 			pos += 2;
 			break;
 		}
@@ -392,7 +392,7 @@ static int dumpRdata(const char *begin, const char *str, uint16_t rtype, int len
 		{
 			if (len - (pos - str) < 4)
 				PELOG_ERROR_RETURN((PLV_ERROR, "Invalid uint32.\n"), -1);
-			fprintf(stderr, "%u ", ntohl(*(const uint32_t *)pos));
+			PELOG_RAWLOG((level, "%u ", ntohl(*(const uint32_t *)pos)));
 			pos += 4;
 			break;
 		}
@@ -401,9 +401,9 @@ static int dumpRdata(const char *begin, const char *str, uint16_t rtype, int len
 			int slen = *(const unsigned char *)pos;
 			if (len - (pos - str) < slen + 1)
 				PELOG_ERROR_RETURN((PLV_ERROR, "Invalid string.\n"), -1);
-			fprintf(stderr, "\"");
-			fwrite(pos + 1, 1, slen, stderr);
-			fprintf(stderr, "\" ");
+			PELOG_RAWLOG((level, "\""));
+			PELOG_RAWWRITE(level, pos + 1, 1, slen);
+			PELOG_RAWLOG((level, "\" "));
 			pos += slen + 1;
 			break;
 		}
@@ -414,9 +414,9 @@ static int dumpRdata(const char *begin, const char *str, uint16_t rtype, int len
 				int slen = *(const unsigned char *)pos;
 				if (len - (pos - str) < slen + 1)
 					PELOG_ERROR_RETURN((PLV_ERROR, "Invalid string.\n"), -1);
-				fprintf(stderr, "\"");
-				fwrite(pos + 1, 1, slen, stderr);
-				fprintf(stderr, "\" ");
+				PELOG_RAWLOG((level, "\""));
+				PELOG_RAWWRITE(level, pos + 1, 1, slen);
+				PELOG_RAWLOG((level, "\" "));
 				pos += slen + 1;
 			}
 			break;
@@ -425,7 +425,7 @@ static int dumpRdata(const char *begin, const char *str, uint16_t rtype, int len
 		default:
 		{
 			for (int i = 0; i < len - (pos - str); ++i)
-				fprintf(stderr, "\\%02X", (int)(unsigned char)pos[i]);
+				PELOG_RAWLOG((level, "\\%02X", (int)(unsigned char)pos[i]));
 			pos += len - (pos - str);
 			if (*fld != RDATA_DUMPHEX)
 				PELOG_ERROR_RETURN((PLV_ERROR, "Not supported.\n"), -1);

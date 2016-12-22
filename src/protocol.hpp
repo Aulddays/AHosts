@@ -56,7 +56,7 @@ int pname2name(const char *str, aulddays::abuf<char> &out);
 // compress/decompress dns packet
 int codecMessage(bool compress, const aulddays::abuf<char> &in, aulddays::abuf<char> &out);
 
-void dumpMessage(const aulddays::abuf<char> &pkt, bool dumpnameptr = true);
+void dumpMessage(int level, const aulddays::abuf<char> &pkt, bool dumpnameptr = true);
 
 // get first name type in first question, return total number of questions
 int getNameType(const abuf<char> &pkt, abuf<char> &nametype);
