@@ -660,6 +660,10 @@ int nametype2print(const char *nametype, size_t nametypelen, abuf<char> &pnamety
 // return TTL of whole pkt, -1: error
 int manageTtl(abuf<char> &pkt, time_t uptime, time_t now)
 {
+	int rcode = (int)((unsigned char)pkt[3] & 0xf);
+	if (rcode != 0 && rcode != 3)
+		PELOG_ERROR_RETURN((PLV_ERROR, "Invalid RCODE %d.\n", rcode), -1);
+
 	int ret = INT_MAX;
 	time_t ttldiff = now > uptime ? now - uptime : 0;
 	const unsigned char *pos = (const unsigned char *)pkt.buf();
@@ -746,8 +750,8 @@ int manageTtl(abuf<char> &pkt, time_t uptime, time_t now)
 	}	// for each section
 	if (ret == INT_MAX)
 	{
-		PELOG_LOG((PLV_WARNING, "Could not get TTL from packet, default to 300\n"));
-		ret = 300;
+		PELOG_LOG((PLV_WARNING, "Could not get TTL from packet, default to 30\n"));
+		ret = 30;
 	}
 	PELOG_LOG((PLV_DEBUG, "Packet TTL %d\n", ret));
 	return ret;

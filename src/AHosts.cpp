@@ -245,50 +245,61 @@ int AHostsJob::serverComplete(DnsServer *server, aulddays::abuf<char> &response)
 	{
 		if (response.size() > 0)
 		{
-			//PELOG_LOG((PLV_DEBUG, "Dump response(" PL_SIZET "):\n", response.size()));
-			//dumpMessage(response);
-			m_tanswer = boost::posix_time::microsec_clock::local_time();
-			abuf<char> dcompresp;
-			if (codecMessage(false, response, dcompresp))
+			int rcode = (int)((unsigned char)response[3] & 0xf);
+			if (rcode == 3)
+				PELOG_LOG((PLV_INFO, "Server returned NXDomain.\n"));
+			else if (rcode != 0)
+				PELOG_LOG((PLV_WARNING, "Server returned RCODE %d.\n", rcode));
+			bool valid = rcode == 0 || rcode == 3;
+			if (valid || m_server.size() == 0)	// valid answer or invalid and no servers pending
 			{
-				// decompress failed, bypass the cache and handler, but still send to client
-				PELOG_LOG((PLV_WARNING, "Decompress response failed. bypass to client.\n"));
-				m_jobst = JOB_RESPERROR;
-			}
-			else
-			{
-				PELOG_LOG((PLV_DEBUG, "Decompressed response(" PL_SIZET "):\n", dcompresp.size()));
-				dumpMessage(PLV_DEBUG, dcompresp, false);
-
-				if (fromServer)
+				//PELOG_LOG((PLV_DEBUG, "Dump response(" PL_SIZET "):\n", response.size()));
+				//dumpMessage(response);
+				m_tanswer = boost::posix_time::microsec_clock::local_time();
+				abuf<char> dcompresp;
+				if (codecMessage(false, response, dcompresp))
 				{
-					if (m_handler.processResponse(dcompresp))
-						PELOG_LOG((PLV_WARNING, "Handle response failed.\n"));
-					else
+					// decompress failed, bypass the cache and handler, but still send to client
+					PELOG_LOG((PLV_WARNING, "Decompress response failed. bypass to client.\n"));
+					m_jobst = JOB_RESPERROR;
+				}
+				else
+				{
+					PELOG_LOG((PLV_DEBUG, "Decompressed response(" PL_SIZET "):\n", dcompresp.size()));
+					dumpMessage(PLV_DEBUG, dcompresp, false);
+	
+					if (fromServer)
 					{
-						PELOG_LOG((PLV_DEBUG, "Handled response(" PL_SIZET "):\n", dcompresp.size()));
-						dumpMessage(PLV_DEBUG, dcompresp, false);
+						if (m_handler.processResponse(dcompresp))
+							PELOG_LOG((PLV_WARNING, "Handle response failed.\n"));
+						else
+						{
+							PELOG_LOG((PLV_DEBUG, "Handled response(" PL_SIZET "):\n", dcompresp.size()));
+							dumpMessage(PLV_DEBUG, dcompresp, false);
+						}
+					}
+					codecMessage(true, dcompresp, response);
+					//PELOG_LOG((PLV_DEBUG, "Recompressed response(" PL_SIZET "):\n", response.size()));
+					//dumpMessage(response);
+					if (server && valid)	// write to cache, only if valid and from a server (not cache)
+					{
+						int ttl = manageTtl(response, 0, 0);
+						if (ttl >= 0)
+							m_ahosts->m_cache.set(m_reqNameType, m_reqNameType.size(), response.buf(), response.size(), ttl);
 					}
 				}
-				codecMessage(true, dcompresp, response);
-				//PELOG_LOG((PLV_DEBUG, "Recompressed response(" PL_SIZET "):\n", response.size()));
-				//dumpMessage(response);
-				if (server)	// write to cache, only when got from a real server (not cache)
+				int oldstatus = m_status;
+				m_status = JOB_GOTANSWER;
+				if (oldstatus != JOB_EARLYRET)
+					m_client->response(response);
+				if (m_server.size() > 0)	// cancel other server since we've got answer
 				{
-					int ttl = manageTtl(response, 0, 0);
-					m_ahosts->m_cache.set(m_reqNameType, m_reqNameType.size(), response.buf(), response.size(), ttl);
+					PELOG_LOG((PLV_VERBOSE, "Canceling all pending servers\n"));
+					for (auto i = m_server.begin(); i != m_server.end(); ++i)
+						(*i)->cancel();
 				}
-			}
-			int oldstatus = m_status;
-			m_status = JOB_GOTANSWER;
-			if (oldstatus != JOB_EARLYRET)
-				m_client->response(response);
-			if (m_server.size() > 0)	// cancel other server since we've got answer
-			{
-				PELOG_LOG((PLV_VERBOSE, "Canceling all pending servers\n"));
-				for (auto i = m_server.begin(); i != m_server.end(); ++i)
-					(*i)->cancel();
-			}
+			}	// 	if (valid || m_server.size() == 0)	// valid answer or invalid and no servers pending
+			// else: invalid but some servers are pending, just do nothing here but wait for other servers
 		}
 		else if (m_server.size() == 0)	// all server finished and no answer
 		{
