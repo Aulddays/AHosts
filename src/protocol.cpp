@@ -627,6 +627,8 @@ int getNameType(const abuf<char> &pkt, abuf<char> &nametype)
 	if (pkt.size() < 12)
 		return -1;
 	int ret = (int)ntohs(*(const uint16_t *)(pkt.buf() + 4));
+	if (ret <= 0)
+		return 0;
 	int namelen = getName(pkt + 12, pkt.size() - 12);
 	if (namelen < 0)
 		return -1;
@@ -755,4 +757,79 @@ int manageTtl(abuf<char> &pkt, time_t uptime, time_t now)
 	}
 	PELOG_LOG((PLV_DEBUG, "Packet TTL %d\n", ret));
 	return ret;
+}
+
+// check if we got complete answer to the question
+bool checkAnswer(const abuf<char> &pkt)
+{
+	int rcode = (int)((unsigned char)pkt[3] & 0xf);
+	if (rcode != 0)
+		PELOG_ERROR_RETURN((PLV_ERROR, "Invalid RCODE %d to check answer.\n", rcode), false);
+
+	// question
+	const unsigned char *pos = (const unsigned char *)pkt.buf();
+	int qdc = ntohs(*(uint16_t *)(pkt + 4));
+	if (qdc <= 0)	// no question
+		return false;
+	int anc = (int)ntohs(*(const uint16_t *)(pos + 6));
+	pos += 12;
+	int qnamelen = getName((const char *)pos, pkt.size() - 12);
+	if (qnamelen <= 0 || pkt.size() < (12u + qnamelen + 2 + 2))	// head + qname + qtype + qclass
+		return false;
+	abuf<char> qname;
+	qname.scopyFrom((const char *)pos, qnamelen);
+	pos += qnamelen;
+	uint16_t qtype = ntohs(*(uint16_t *)pos);
+	uint16_t qclass = ntohs(*(uint16_t *)(pos + 2));
+	pos += 4;
+
+	std::map<abuf<char>, abuf<char> > ansmap;
+	for (int ient = 0; ient < anc; ++ient)	// iterate all answers
+	{
+		int nameptr = (const char *)pos - pkt;
+		int namel = getName((const char *)pos, pkt.size() - nameptr);
+		if (namel < 0)
+			PELOG_ERROR_RETURN((PLV_ERROR, "Invalid name.\n"), false);
+		abuf<char> aname;
+		aname.scopyFrom((const char *)pos, namel);
+		pos += namel;
+		uint16_t atype = ntohs(*(uint16_t *)pos);
+		uint16_t aclass = ntohs(*(uint16_t *)(pos + 2));
+		if ((const char *)pos - pkt + 10 >(int)pkt.size())
+			PELOG_ERROR_RETURN((PLV_ERROR, "Incomplete rdata\n"), false);
+		uint16_t rtype = ntohs(*(const uint16_t *)pos);
+		pos += 8;
+		uint16_t rlen = ntohs(*(const uint16_t *)pos);
+		pos += 2;
+		if ((const char *)pos - pkt + rlen > (int)pkt.size())
+			PELOG_ERROR_RETURN((PLV_ERROR, "Incomplete rdata\n"), false);
+		if (aclass == qclass)
+		{
+			if (atype == qtype)	// requested type
+				ansmap[aname] = abuf<char>();
+			else if (atype == RT_CNAME && ansmap.find(aname) == ansmap.end())	// cname, only valid if no other answer for this name
+			{
+				int cnamel = getName((const char *)pos, rlen);
+				if (cnamel != rlen)
+					PELOG_ERROR_RETURN((PLV_ERROR, "Invalid cname.\n"), false);
+				abuf<char> cname;
+				cname.scopyFrom((const char *)pos, cnamel);
+				ansmap[aname] = cname;
+			}
+		}
+		pos += rlen;
+	}	// for each record
+
+	// check final answer in ansmap
+	const abuf<char> *cur = &qname;
+	while (true)
+	{
+		auto iname = ansmap.find(*cur);
+		if (iname == ansmap.end())
+			return false;
+		else if (iname->second.isNull())
+			return true;
+		cur = &(iname->second);
+	}
+	return false;
 }

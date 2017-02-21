@@ -68,3 +68,6 @@ int nametype2print(const abuf<char> &nametype, abuf<char> &pnametype);
 // update TTLs in pkt (minus (now - uptime)).
 // return TTL of whole pkt, -1: error
 int manageTtl(abuf<char> &pkt, time_t uptime, time_t now);
+
+// check if we got complete answer to the question
+bool checkAnswer(const abuf<char> &pkt);

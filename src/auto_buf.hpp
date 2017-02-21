@@ -357,6 +357,13 @@ public:
 			memcpy(_buf, copy._buf, _size);
 		abuf_mem_check();
 	}
+	const abuf &operator =(const abuf &copy)
+	{
+		if (0 == resize(copy.size()))
+			memcpy(_buf, copy._buf, _size);
+		abuf_mem_check();
+		return *this;
+	}
 	abuf(const char *copy = NULL): basic_abuf<char>()
 	{
 		if(!copy)

@@ -245,25 +245,39 @@ int AHostsJob::serverComplete(DnsServer *server, aulddays::abuf<char> &response)
 	{
 		if (response.size() > 0)
 		{
-			int rcode = (int)((unsigned char)response[3] & 0xf);
+			int rcode = response.size() > 3 ? (int)((unsigned char)response[3] & 0xf) : -1;
 			if (rcode == 3)
 				PELOG_LOG((PLV_INFO, "Server returned NXDomain.\n"));
 			else if (rcode != 0)
 				PELOG_LOG((PLV_WARNING, "Server returned RCODE %d.\n", rcode));
 			bool valid = rcode == 0 || rcode == 3;
+			abuf<char> dcompresp;
+			if (valid && codecMessage(false, response, dcompresp))
+			{
+				// decompress failed, bypass the cache and handler, but still send to client
+				PELOG_LOG((PLV_WARNING, "Decompress response failed.\n"));
+				m_jobst = JOB_RESPERROR;
+				valid = false;
+			}
+			else if (server && dcompresp.size() > 0 && rcode == 0)
+			{
+				valid = checkAnswer(dcompresp);
+				if (!valid)
+				{
+					PELOG_LOG((PLV_WARNING, "Server response incomplete. Possibly not fully recursive.\n"));
+					dumpMessage(PLV_TRACE, dcompresp, false);
+				}
+				else
+				{
+					PELOG_LOG((PLV_DEBUG, "checkAnswer OK.\n"));
+				}
+			}
 			if (valid || m_server.size() == 0)	// valid answer or invalid and no servers pending
 			{
 				//PELOG_LOG((PLV_DEBUG, "Dump response(" PL_SIZET "):\n", response.size()));
 				//dumpMessage(response);
 				m_tanswer = boost::posix_time::microsec_clock::local_time();
-				abuf<char> dcompresp;
-				if (codecMessage(false, response, dcompresp))
-				{
-					// decompress failed, bypass the cache and handler, but still send to client
-					PELOG_LOG((PLV_WARNING, "Decompress response failed. bypass to client.\n"));
-					m_jobst = JOB_RESPERROR;
-				}
-				else
+				if (valid)
 				{
 					PELOG_LOG((PLV_DEBUG, "Decompressed response(" PL_SIZET "):\n", dcompresp.size()));
 					dumpMessage(PLV_DEBUG, dcompresp, false);
