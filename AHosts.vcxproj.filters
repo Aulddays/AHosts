@@ -13,18 +13,24 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="Header Files\libconfig">
+      <UniqueIdentifier>{ca857f95-7c8c-4e39-af9d-d81e91ab45a4}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\libconfig">
+      <UniqueIdentifier>{6ce6e002-7c70-4a76-88ac-5a6bc744cf84}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\utils">
+      <UniqueIdentifier>{35126a07-7ded-479e-b9d6-7855ee1f110e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\utils">
+      <UniqueIdentifier>{7f672f87-675f-4d04-a61c-a06548d7380e}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\AHosts.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\stdafx.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="src\server.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="src\pe_log.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\AHostsConf.cpp">
@@ -36,51 +42,48 @@
     <ClCompile Include="src\protocol.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\ah_memmem.c">
+    <ClCompile Include="src\TcpServer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\libconfig\grammar.c">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\libconfig</Filter>
     </ClCompile>
     <ClCompile Include="src\libconfig\libconfig.c">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\libconfig</Filter>
     </ClCompile>
     <ClCompile Include="src\libconfig\scanctx.c">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\libconfig</Filter>
     </ClCompile>
     <ClCompile Include="src\libconfig\scanner.c">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\libconfig</Filter>
     </ClCompile>
     <ClCompile Include="src\libconfig\strbuf.c">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\libconfig</Filter>
     </ClCompile>
     <ClCompile Include="src\libconfig\strvec.c">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\libconfig</Filter>
     </ClCompile>
     <ClCompile Include="src\libconfig\util.c">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\libconfig</Filter>
     </ClCompile>
     <ClCompile Include="src\libconfig\wincompat.c">
+      <Filter>Source Files\libconfig</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ah_memmem.c">
+      <Filter>Source Files\utils</Filter>
+    </ClCompile>
+    <ClCompile Include="src\pe_log.cpp">
+      <Filter>Source Files\utils</Filter>
+    </ClCompile>
+    <ClCompile Include="src\stdafx.cpp">
+      <Filter>Source Files\utils</Filter>
+    </ClCompile>
+    <ClCompile Include="src\UdpServer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="src\asio.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\targetver.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\stdafx.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="src\AHosts.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\auto_buf.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\pe_log.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\AHostsConf.hpp">
@@ -92,40 +95,61 @@
     <ClInclude Include="src\protocol.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="src\ah_memmem.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="src\AHostsCache.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="src\ap_dirent.h">
+    <ClInclude Include="Src\TcpServer.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\libconfig\grammar.h">
-      <Filter>Header Files</Filter>
+      <Filter>Header Files\libconfig</Filter>
     </ClInclude>
     <ClInclude Include="src\libconfig\libconfig.h">
-      <Filter>Header Files</Filter>
+      <Filter>Header Files\libconfig</Filter>
     </ClInclude>
     <ClInclude Include="src\libconfig\parsectx.h">
-      <Filter>Header Files</Filter>
+      <Filter>Header Files\libconfig</Filter>
     </ClInclude>
     <ClInclude Include="src\libconfig\scanctx.h">
-      <Filter>Header Files</Filter>
+      <Filter>Header Files\libconfig</Filter>
     </ClInclude>
     <ClInclude Include="src\libconfig\scanner.h">
-      <Filter>Header Files</Filter>
+      <Filter>Header Files\libconfig</Filter>
     </ClInclude>
     <ClInclude Include="src\libconfig\strbuf.h">
-      <Filter>Header Files</Filter>
+      <Filter>Header Files\libconfig</Filter>
     </ClInclude>
     <ClInclude Include="src\libconfig\strvec.h">
-      <Filter>Header Files</Filter>
+      <Filter>Header Files\libconfig</Filter>
     </ClInclude>
     <ClInclude Include="src\libconfig\util.h">
-      <Filter>Header Files</Filter>
+      <Filter>Header Files\libconfig</Filter>
     </ClInclude>
     <ClInclude Include="src\libconfig\wincompat.h">
+      <Filter>Header Files\libconfig</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ah_memmem.h">
+      <Filter>Header Files\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ap_dirent.h">
+      <Filter>Header Files\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="src\asio.hpp">
+      <Filter>Header Files\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="src\auto_buf.hpp">
+      <Filter>Header Files\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="src\pe_log.h">
+      <Filter>Header Files\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="src\stdafx.h">
+      <Filter>Header Files\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="src\targetver.h">
+      <Filter>Header Files\utils</Filter>
+    </ClInclude>
+    <ClInclude Include="src\UdpServer.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
