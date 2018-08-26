@@ -16,7 +16,8 @@ public:
 	bool m_loaded;
 
 	uint16_t m_port;
-	std::vector<asio::ip::udp::endpoint> m_servers;
+	std::vector<asio::ip::udp::endpoint> m_uservers;
+	std::vector<asio::ip::tcp::endpoint> m_tservers;
 	size_t m_cacheSize;
 	unsigned int m_timeout;
 	unsigned int m_earlyTimeout;

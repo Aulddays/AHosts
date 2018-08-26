@@ -11,7 +11,7 @@ public:
 		: DnsServer(job, ioService, timeout), m_socket(m_ioService, asio::ip::udp::v4()),
 		m_remote(remote), m_start(std::chrono::steady_clock::time_point::min()), m_cancel(false){}
 	virtual ~UdpServer(){}
-	virtual int send(aulddays::abuf<char> &req);
+	virtual int send(const aulddays::abuf<char> &req);
 	virtual int cancel();
 	virtual int heartBeat(const std::chrono::steady_clock::time_point &now);
 private:

@@ -43,7 +43,7 @@ public:
 		: m_job(job), m_ioService(ioService), m_id(-1), m_timeout(timeout), m_status(SERVER_BEGIN){}
 	virtual ~DnsServer(){}
 	//void setClient(DnsClient *client){ m_client = client; }
-	virtual int send(aulddays::abuf<char> &req) = 0;
+	virtual int send(const aulddays::abuf<char> &req) = 0;
 	virtual int cancel() = 0;
 	// return: 0 ok, >0 timedout, <0 error
 	virtual int heartBeat(const std::chrono::steady_clock::time_point &now) = 0;

@@ -13,7 +13,7 @@
 #endif  // _DEBUG
 
 // UdpServer
-int UdpServer::send(aulddays::abuf<char> &req)
+int UdpServer::send(const aulddays::abuf<char> &req)
 {
 	m_start = std::chrono::steady_clock::now();
 	// look for an available local port
@@ -74,11 +74,12 @@ void UdpServer::onReqSent(const asio::error_code& error, size_t size)
 
 void UdpServer::onResponse(const asio::error_code& error, size_t size)
 {
+	// if peek result
+	if (!error && !m_cancel && m_res.size() == 0
 #ifdef _MSC_VER
-	if (error && !m_cancel && m_res.size() == 0 && error.value() == ERROR_MORE_DATA)	// peek result
-#else
-	if (!error && !m_cancel && m_res.size() == 0)	// peek result. TODO: the Linux behavior is yet to be verified
+		|| error && !m_cancel && m_res.size() == 0 && error.value() == ERROR_MORE_DATA
 #endif
+		)
 	{
 		m_res.resize(m_socket.available());
 		PELOG_LOG((PLV_DEBUG, "Response size from server " PL_SIZET "\n", m_res.size()));

@@ -192,15 +192,18 @@ int AHostsJob::request(const aulddays::abuf<char> &req)
 	}
 	// send to upstream servers
 	m_status = JOB_REQUESTING;
-	for (auto i = m_ahosts->getConf().m_servers.begin(); i != m_ahosts->getConf().m_servers.end(); ++i)
+	for (auto i = m_ahosts->getConf().m_uservers.begin(); i != m_ahosts->getConf().m_uservers.end(); ++i)
 	{
 		UdpServer *server = new UdpServer(this, m_ioService, *i, m_ahosts->getConf().m_timeout);
 		m_server.insert(server);
 	}
-	for (DnsServer *server : m_server)
+	for (auto i = m_ahosts->getConf().m_tservers.begin(); i != m_ahosts->getConf().m_tservers.end(); ++i)
 	{
-		server->send(m_request);
+		TcpServer *server = new TcpServer(this, m_ioService, *i, m_ahosts->getConf().m_timeout);
+		m_server.insert(server);
 	}
+	for (DnsServer *server : m_server)
+		server->send(m_request);
 	return 0;
 }
 
