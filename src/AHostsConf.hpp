@@ -3,7 +3,7 @@
 
 #include <map>
 #include <vector>
-#include "protocol.hpp"
+//#include "protocol.hpp"
 #include "asio.hpp"
 
 struct AHostsConf

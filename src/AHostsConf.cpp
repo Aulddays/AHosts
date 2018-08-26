@@ -1,7 +1,7 @@
 #include "stdafx.h"
-#include <boost/property_tree/info_parser.hpp>
 #include "AHostsConf.hpp"
 #include "AHostsHandler.h"
+#include "libconfig/libconfig.h"
 
 static void strsplit(std::string str, char deli, std::vector<std::string> &parts)
 {
@@ -23,24 +23,28 @@ int AHostsConf::load(const char *conffile)
 	if (m_loaded)
 		PELOG_LOG_RETURN((PLV_WARNING, "Conf already loaded.\n"), 0);
 
-	boost::property_tree::ptree config;
-	try
+	config_t config;
+	config_init(&config);
+	if (CONFIG_FALSE == config_read_file(&config, conffile))
 	{
-		boost::property_tree::info_parser::read_info(conffile, config);
-	}
-	catch (boost::property_tree::info_parser::info_parser_error &e)
-	{
-		PELOG_LOG((PLV_ERROR, "%s\n", e.what()));
-		PELOG_ERROR_RETURN((PLV_ERROR, "Error loading config file\n"), 1);
+		PELOG_ERROR_RETURN((PLV_ERROR, "Error loading config file (line %d): %s\n",
+			config_error_line(&config), config_error_text(&config)), 1);
 	}
 
+	// Logging
+	pelog_setfile_rotate(config_get_int(&config, "Log.logrotate_filesize_kb", -1),
+		config_get_int(&config, "Log.logrotate_history_num", -1),
+		config_get_string(&config, "Log.logfile", ""),
+		config_get_bool(&config, "Log.loglinebuf", false));
+	pelog_setlevel(config_get_string(&config, "Log.loglevel", "TRC"));
+
 	// listen port
-	m_port = config.get("Port", 53);
+	m_port = config_get_int(&config, "Port", 53);
 	PELOG_LOG((PLV_INFO, "Port: %d\n", (int)m_port));
 
 	// servers
 	{
-		std::string servers = config.get("Servers", "");
+		std::string servers = config_get_string(&config, "Servers", "");
 		m_servers.clear();
 		std::vector<std::string> sservers;
 		strsplit(servers, ';', sservers);
@@ -69,16 +73,16 @@ int AHostsConf::load(const char *conffile)
 			PELOG_ERROR_RETURN((PLV_ERROR, "No valid servers found\n"), -1);
 	}
 
-	m_cacheSize = config.get("CacheSize", (size_t)5000);
+	m_cacheSize = config_get_int(&config, "CacheSize", 5000);
 	PELOG_LOG((PLV_INFO, "CacheSize: " PL_SIZET "\n", m_cacheSize));
 
-	m_timeout = config.get("Timeout", 20000u);
+	m_timeout = config_get_int(&config, "Timeout", 20000);
 	PELOG_LOG((PLV_INFO, "Timeout: %u\n", m_timeout));
 
-	m_earlyTimeout = config.get("EarlyTimeout", 1500u);
+	m_earlyTimeout = config_get_int(&config, "EarlyTimeout", 1500);
 	PELOG_LOG((PLV_INFO, "EarlyTimeout: %u\n", m_earlyTimeout));
 
-	m_hostsFilename = config.get("HostsExtFile", "");
+	m_hostsFilename = config_get_string(&config, "HostsExtFile", "");
 	PELOG_LOG((PLV_INFO, "HostsExtFile: %s\n", m_hostsFilename.c_str()));
 
 	if (m_hostsFilename != "" &&

@@ -10,8 +10,6 @@
 
 #include "targetver.h"
 
-#define _CRT_SECURE_NO_WARNINGS
-
 #if defined(_DEBUG)
 #	define _CRTDBG_MAP_ALLOC
 #	include <crtdbg.h>
@@ -23,6 +21,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#define ASIO_STANDALONE
 #include "asio.hpp"
 #include "auto_buf.hpp"
 using namespace aulddays;

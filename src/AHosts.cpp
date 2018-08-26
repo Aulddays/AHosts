@@ -2,8 +2,8 @@
 //
 
 #include "stdafx.h"
-#include <boost/bind.hpp>
 #include "AHosts.hpp"
+#include "protocol.hpp"
 
 #if defined(_DEBUG) && defined(_MSC_VER)
 #	ifndef DBG_NEW
@@ -16,7 +16,7 @@
 #	define getpid _getpid
 #endif
 
-boost::mt19937 AHostsRand((uint32_t)time(NULL) + getpid());
+std::mt19937 AHostsRand((uint32_t)time(NULL) + getpid());
 
 // AHosts
 //AHosts::AHosts()
@@ -43,8 +43,8 @@ int AHosts::start()
 	int res = 0;
 	if (res = listenUdp())
 		PELOG_ERROR_RETURN((PLV_ERROR, "AHosts start failed.\n"), res);
-	m_hbTimer.expires_from_now(boost::posix_time::milliseconds(HBTIMEMS));
-	m_hbTimer.async_wait(boost::bind(&AHosts::onHeartbeat, this, asio::placeholders::error));
+	m_hbTimer.expires_from_now(asio::chrono::milliseconds(HBTIMEMS));
+	m_hbTimer.async_wait(std::bind(&AHosts::onHeartbeat, this, std::placeholders::_1 /*error*/));
 
 	return m_ioService.run();
 }
@@ -54,7 +54,7 @@ int AHosts::listenUdp()
 	m_uRemote = asio::ip::udp::endpoint();	// clear remote
 	m_ucRecvBuf.resize(520);
 	m_uSocket.async_receive_from(asio::buffer(m_ucRecvBuf, m_ucRecvBuf.size()), m_uRemote,
-		boost::bind(&AHosts::onUdpRequest, this, asio::placeholders::error, asio::placeholders::bytes_transferred));
+		std::bind(&AHosts::onUdpRequest, this, std::placeholders::_1 /*error*/, std::placeholders::_2 /*bytes_transferred*/));
 	return 0;
 }
 
@@ -91,11 +91,11 @@ void AHosts::onHeartbeat(const asio::error_code& error)
 	//PELOG_LOG((PLV_DEBUG, "Heart Beat\n"));
 	if (!error)
 	{
-		boost::posix_time::ptime now = boost::posix_time::microsec_clock::local_time();
+		std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
 		for (auto i = m_jobs.begin(); i != m_jobs.end(); ++i)
 			(*i)->heartBeat(now);
-		m_hbTimer.expires_from_now(boost::posix_time::milliseconds(HBTIMEMS));
-		m_hbTimer.async_wait(boost::bind(&AHosts::onHeartbeat, this, asio::placeholders::error));
+		m_hbTimer.expires_from_now(asio::chrono::milliseconds(HBTIMEMS));
+		m_hbTimer.async_wait(std::bind(&AHosts::onHeartbeat, this, std::placeholders::_1 /*error*/));
 	}
 	else if (error)
 	{
@@ -111,7 +111,7 @@ AHostsJob::AHostsJob(AHosts *ahosts, asio::io_service &ioService)
 	m_status(JOB_BEGIN), m_jobst(JOB_OK), m_questionNum(-1)
 {
 	//m_server = new UdpServer(this, m_ioService);
-	m_tstart = m_tearly = m_tanswer = m_treply = m_tfin = boost::posix_time::microsec_clock::local_time();
+	m_tstart = m_tearly = m_tanswer = m_treply = m_tfin = std::chrono::steady_clock::now();
 	//m_server->setClient(m_client);
 }
 
@@ -213,7 +213,7 @@ int AHostsJob::clientComplete(DnsClient *client, int status)
 		status = -1;
 	}
 	if (status <= 0)
-		m_treply = boost::posix_time::microsec_clock::local_time();
+		m_treply = std::chrono::steady_clock::now();
 	// on early return, we do not change m_status, but serverComplete() has to
 	// check m_client()->responded() to determine client has finished
 	if (m_status != JOB_EARLYRET || m_server.size() == 0)
@@ -276,7 +276,7 @@ int AHostsJob::serverComplete(DnsServer *server, aulddays::abuf<char> &response)
 			{
 				//PELOG_LOG((PLV_DEBUG, "Dump response(" PL_SIZET "):\n", response.size()));
 				//dumpMessage(response);
-				m_tanswer = boost::posix_time::microsec_clock::local_time();
+				m_tanswer = std::chrono::steady_clock::now();
 				if (valid)
 				{
 					PELOG_LOG((PLV_DEBUG, "Decompressed response(" PL_SIZET "):\n", dcompresp.size()));
@@ -317,7 +317,7 @@ int AHostsJob::serverComplete(DnsServer *server, aulddays::abuf<char> &response)
 		}
 		else if (m_server.size() == 0)	// all server finished and no answer
 		{
-			//m_tanswer = boost::posix_time::microsec_clock::local_time();
+			//m_tanswer = std::chrono::steady_clock::now();
 			int oldstatus = m_status;
 			m_status = JOB_GOTANSWER;
 			if (oldstatus != JOB_EARLYRET)
@@ -333,12 +333,12 @@ int AHostsJob::serverComplete(DnsServer *server, aulddays::abuf<char> &response)
 	return 0;
 }
 
-int AHostsJob::heartBeat(const boost::posix_time::ptime &now)
+int AHostsJob::heartBeat(const std::chrono::steady_clock::time_point &now)
 {
 	int ret = 0;
 	if (m_status == JOB_REQUESTING)
 	{
-		int64_t passed = (now - m_tstart).total_milliseconds();
+		int64_t passed = (std::chrono::duration_cast<std::chrono::milliseconds>(now - m_tstart)).count();
 		int earlyTimeout = (int)m_ahosts->getConf().m_earlyTimeout;
 		if (earlyTimeout > 0 && (passed > earlyTimeout || passed < (0 - earlyTimeout)))
 		{
@@ -351,7 +351,7 @@ int AHostsJob::heartBeat(const boost::posix_time::ptime &now)
 				PELOG_LOG((PLV_INFO, "Early return %s %d:%d.\n",
 					m_reqPrint.buf(), int(passed), earlyTimeout));
 				m_status = JOB_EARLYRET;
-				m_tearly = boost::posix_time::microsec_clock::local_time();
+				m_tearly = std::chrono::steady_clock::now();
 				//m_early = true;
 				m_client->response(m_cached);
 			}
@@ -381,22 +381,22 @@ void AHostsJob::finished()
 	static const char *jobstNames[] = {
 		"OK", "REQ_ERROR", "TIMEOUT", "RESPERROR"
 	};
-	BOOST_STATIC_ASSERT(sizeof(jobstNames) / sizeof(jobstNames[0]) == JOB_STNUM);
-	m_tfin = boost::posix_time::microsec_clock::local_time();
+	static_assert(sizeof(jobstNames) / sizeof(jobstNames[0]) == JOB_STNUM, "jobstNames mismatching");
+	m_tfin = std::chrono::steady_clock::now();
 	PELOG_LOG((PLV_INFO, "STATUS req(%s) res(%s), tely(%d) tans(%d) trpl(%d) tfin(%d)\n",
 		m_reqPrint.buf(), jobstNames[m_jobst],
-		(int)(m_tearly - m_tstart).total_milliseconds(),
-		(int)(m_tanswer - m_tstart).total_milliseconds(),
-		(int)(m_treply - m_tstart).total_milliseconds(),
-		(int)(m_tfin - m_tstart).total_milliseconds()));
+		(int)std::chrono::duration_cast<std::chrono::milliseconds>(m_tearly - m_tstart).count(),
+		(int)std::chrono::duration_cast<std::chrono::milliseconds>(m_tanswer - m_tstart).count(),
+		(int)std::chrono::duration_cast<std::chrono::milliseconds>(m_treply - m_tstart).count(),
+		(int)std::chrono::duration_cast<std::chrono::milliseconds>(m_tfin - m_tstart).count()));
 }
 
 // UdpServer
 int UdpServer::send(aulddays::abuf<char> &req)
 {
-	m_start = boost::posix_time::microsec_clock::local_time();
+	m_start = std::chrono::steady_clock::now();
 	// look for an available local port
-	boost::uniform_int<> randport(16385, 32767);
+	std::uniform_int_distribution<> randport(16385, 32767);
 	bool bindok = false;
 	for (int i = 0; i < 10; ++i)
 	{
@@ -421,14 +421,14 @@ int UdpServer::send(aulddays::abuf<char> &req)
 	}
 	m_req.scopyFrom(req);
 	// assign a new id to request
-	boost::uniform_int<> randid(1024, uint16_t(-1) - 1);
+	std::uniform_int_distribution<> randid(1024, uint16_t(-1) - 1);
 	m_id = randid(AHostsRand);
 	*(uint16_t *)(char *)m_req = htons(m_id);
 	PELOG_LOG((PLV_DEBUG, "To send to server %s:%d on %d. id(%d) size(" PL_SIZET ")\n",
 		m_remote.address().to_string().c_str(), (int)m_remote.port(), (int)m_socket.local_endpoint().port(), m_id, req.size()));
 	m_status = SERVER_SENDING;
 	m_socket.async_send_to(asio::buffer(m_req, m_req.size()), m_remote,
-		boost::bind(&UdpServer::onReqSent, this, asio::placeholders::error, asio::placeholders::bytes_transferred));
+		std::bind(&UdpServer::onReqSent, this, std::placeholders::_1 /*error*/, std::placeholders::_2 /*bytes_transferred*/));
 	return 0;
 }
 
@@ -448,7 +448,7 @@ void UdpServer::onReqSent(const asio::error_code& error, size_t size)
 	m_status = SERVER_WAITING;
 	// since we do not know the response size yet, we just peek with empty buffer at first to get the size
 	m_socket.async_receive_from(asio::buffer(m_res, 0), m_remote, MSG_PEEK,
-		boost::bind(&UdpServer::onResponse, this, asio::placeholders::error, asio::placeholders::bytes_transferred));
+		std::bind(&UdpServer::onResponse, this, std::placeholders::_1 /*error*/, std::placeholders::_2 /*bytes_transferred*/));
 }
 
 void UdpServer::onResponse(const asio::error_code& error, size_t size)
@@ -462,7 +462,7 @@ void UdpServer::onResponse(const asio::error_code& error, size_t size)
 		m_res.resize(m_socket.available());
 		PELOG_LOG((PLV_DEBUG, "Response size from server " PL_SIZET "\n", m_res.size()));
 		m_socket.async_receive_from(asio::buffer(m_res, m_res.size()), m_remote,
-			boost::bind(&UdpServer::onResponse, this, asio::placeholders::error, asio::placeholders::bytes_transferred));
+			std::bind(&UdpServer::onResponse, this, std::placeholders::_1 /*error*/, std::placeholders::_2 /*bytes_transferred*/));
 		return;
 	}
 	if (error)
@@ -505,12 +505,12 @@ int UdpServer::cancel()
 }
 
 // return: 0 ok, >0 timedout, <0 error
-int UdpServer::heartBeat(const boost::posix_time::ptime &now)
+int UdpServer::heartBeat(const std::chrono::steady_clock::time_point &now)
 {
 	int ret = 0;
 	if (m_status >= SERVER_SENDING && m_status <= SERVER_WAITING)
 	{
-		int64_t passed = (now - m_start).total_milliseconds();
+		int64_t passed = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_start).count();
 		if (passed > m_timeout || passed < (0 - (signed int)m_timeout))
 		{
 			PELOG_LOG((PLV_INFO, "Server timed-out %d:%d.\n", int(passed), (int)m_timeout));
@@ -524,7 +524,7 @@ int UdpServer::heartBeat(const boost::posix_time::ptime &now)
 // UdpClient
 UdpClient::UdpClient(AHostsJob *job, asio::io_service &ioService, unsigned timeout)
 	: DnsClient(job, ioService, timeout), m_socket(ioService, asio::ip::udp::v4()),
-	m_start(boost::posix_time::min_date_time), m_cancel(false)
+	m_start(std::chrono::steady_clock::time_point::min()), m_cancel(false)
 {
 }
 
@@ -548,12 +548,12 @@ int UdpClient::response(aulddays::abuf<char> &res)
 		PELOG_ERROR_RETURN((PLV_ERROR, "Client in invalid status %d\n", m_status), 1);
 	// write back original id
 	*(uint16_t *)(char *)res = htons(m_id);
-	m_start = boost::posix_time::microsec_clock::local_time();
+	m_start = std::chrono::steady_clock::now();
 	m_status = CLIENT_RESPONDING;
 	PELOG_LOG((PLV_DEBUG, "To send to client %s:%d on %d. size " PL_SIZET "\n",
 		m_remote.address().to_string().c_str(), (int)m_remote.port(), (int)m_socket.local_endpoint().port(), res.size()));
 	m_socket.async_send_to(asio::buffer(res, res.size()), m_remote,
-		boost::bind(&UdpClient::onResponsed, this, asio::placeholders::error, asio::placeholders::bytes_transferred));
+		std::bind(&UdpClient::onResponsed, this, std::placeholders::_1 /*error*/, std::placeholders::_2 /*bytes_transferred*/));
 	return 0;
 }
 
@@ -598,12 +598,12 @@ int UdpClient::cancel()
 }
 
 // return: 0 ok, >0 timedout, <0 error
-int UdpClient::heartBeat(const boost::posix_time::ptime &now)
+int UdpClient::heartBeat(const std::chrono::steady_clock::time_point &now)
 {
 	int ret = 0;
 	if (m_status == CLIENT_RESPONDING)
 	{
-		int64_t passed = (now - m_start).total_milliseconds();
+		int64_t passed = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_start).count();
 		if (passed > m_timeout || passed < (0 - (signed int)m_timeout))
 		{
 			PELOG_LOG((PLV_INFO, "Client timed-out %d:%d.\n", int(passed), (int)m_timeout));

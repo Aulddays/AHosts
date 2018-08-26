@@ -1,8 +1,6 @@
 #include "stdafx.h"
-#include "protocol.hpp"
-#include <boost/assign.hpp>
-#include <boost/static_assert.hpp>
 #include <map>
+#include "protocol.hpp"
 
 // get qname at str, return length. if error occurred, return -1
 int getName(const char *str, size_t max)
@@ -76,13 +74,13 @@ int pname2name(const char *str, aulddays::abuf<char> &out)
 
 const char *type2name(uint16_t type)
 {
-	static const std::map<uint16_t, std::string> typemap = boost::assign::map_list_of
-		(RT_A, "A") (RT_NS, "NS") (RT_MD, "MD") (RT_MF, "MF") (RT_CNAME, "CNAME")
-		(RT_SOA, "SOA") (RT_MB, "MB") (RT_MG, "MR") (RT_NULL, "NULL")
-		(RT_WKS, "WKS") (RT_PTR, "PTR") (RT_HINFO, "HINFO") (RT_MINFO, "MINFO")
-		(RT_MX, "MX") (RT_TXT, "TXT") (RT_RP, "RP") (RT_AFSDB, "AFSDB")
-		(RT_X25, "X25") (RT_ISDN, "ISDN") (RT_RT, "RT")
-		(RT_AAAA, "AAAA") (RT_SRV, "SRV") (RT_ANY, "ANY") (RT_OPT, "OPT_PSEUDO");
+	static const std::map<uint16_t, std::string> typemap = {
+		{ RT_A, "A" }, { RT_NS, "NS" }, { RT_MD, "MD" }, { RT_MF, "MF" }, { RT_CNAME, "CNAME" },
+		{ RT_SOA, "SOA" }, { RT_MB, "MB" }, { RT_MG, "MR" }, { RT_NULL, "NULL" },
+		{ RT_WKS, "WKS" }, { RT_PTR, "PTR" }, { RT_HINFO, "HINFO" }, { RT_MINFO, "MINFO" },
+		{ RT_MX, "MX" }, { RT_TXT, "TXT" }, { RT_RP, "RP" }, { RT_AFSDB, "AFSDB" },
+		{ RT_X25, "X25" }, { RT_ISDN, "ISDN" }, { RT_RT, "RT" },
+		{ RT_AAAA, "AAAA" }, { RT_SRV, "SRV" }, { RT_ANY, "ANY" }, { RT_OPT, "OPT_PSEUDO" }, };
 	auto itype = typemap.find(type);
 	if (itype != typemap.end())
 		return itype->second.c_str();
@@ -290,41 +288,38 @@ static const size_t RdataFieldSize[] =
 	4,	// RDATA_IP,    
 	16,	// RDATA_IPV6,  
 };
-BOOST_STATIC_ASSERT(sizeof(RdataFieldSize) / sizeof(RdataFieldSize[0]) == RDATA_SIZEMAX + 1);
-typedef std::vector<RdataFields> RdataList;
+static_assert(sizeof(RdataFieldSize) / sizeof(RdataFieldSize[0]) == RDATA_SIZEMAX + 1,
+	"RdataFieldSize and RDATA_SIZEMAX mismatch");
 // RDATA field list for each type
-// boost::assign::list_of would fail on vector in C++11, in which vectors' constructor
-// take vector&& and size_t are equally good, and so ambiguity is compalined.
-// the convert_to_container<RdataList>() is a workaround for this.
-static const std::map<uint16_t, RdataList> rdfmt = boost::assign::map_list_of
-	(RT_A, boost::assign::list_of(RDATA_IP).convert_to_container<RdataList>())
-	(RT_NS, boost::assign::list_of(RDATA_NAME).convert_to_container<RdataList>())
-	(RT_MD, boost::assign::list_of(RDATA_RNAME).convert_to_container<RdataList>())
-	(RT_MF, boost::assign::list_of(RDATA_RNAME).convert_to_container<RdataList>())
-	(RT_CNAME, boost::assign::list_of(RDATA_NAME).convert_to_container<RdataList>())
-	(RT_SOA, boost::assign::list_of(RDATA_NAME)(RDATA_NAME)(RDATA_UINT32)(RDATA_UINT32)(RDATA_UINT32)(RDATA_UINT32)(RDATA_UINT32).convert_to_container<RdataList>())
-	(RT_MB, boost::assign::list_of(RDATA_RNAME).convert_to_container<RdataList>())
-	(RT_MG, boost::assign::list_of(RDATA_RNAME).convert_to_container<RdataList>())
-	(RT_MR, boost::assign::list_of(RDATA_RNAME).convert_to_container<RdataList>())
-	(RT_NULL, boost::assign::list_of(RDATA_DUMPHEX).convert_to_container<RdataList>())
-	(RT_WKS, boost::assign::list_of(RDATA_IP)(RDATA_UINT8)(RDATA_DUMPHEX).convert_to_container<RdataList>())
-	(RT_PTR, boost::assign::list_of(RDATA_NAME).convert_to_container<RdataList>())
-	(RT_HINFO, boost::assign::list_of(RDATA_STRING)(RDATA_STRING).convert_to_container<RdataList>())
-	(RT_MINFO, boost::assign::list_of(RDATA_RNAME)(RDATA_RNAME).convert_to_container<RdataList>())
-	(RT_MX, boost::assign::list_of(RDATA_UINT16)(RDATA_NAME).convert_to_container<RdataList>())
-	(RT_TXT, boost::assign::list_of(RDATA_TXT).convert_to_container<RdataList>())
-	(RT_RP, boost::assign::list_of(RDATA_RNAME)(RDATA_RNAME).convert_to_container<RdataList>())
-	(RT_AFSDB, boost::assign::list_of(RDATA_UINT16)(RDATA_RNAME).convert_to_container<RdataList>())
-	(RT_X25, boost::assign::list_of(RDATA_STRING).convert_to_container<RdataList>())
-	(RT_ISDN, boost::assign::list_of(RDATA_DUMPHEX).convert_to_container<RdataList>())
-	(RT_RT, boost::assign::list_of(RDATA_UINT16)(RDATA_RNAME).convert_to_container<RdataList>())
-	(RT_AAAA, boost::assign::list_of(RDATA_IPV6).convert_to_container<RdataList>())
-	(RT_SRV, boost::assign::list_of(RDATA_UINT16)(RDATA_UINT16)(RDATA_UINT16)(RDATA_RNAME).convert_to_container<RdataList>())
-	(RT_OPT, boost::assign::list_of(RDATA_DUMPHEX).convert_to_container<RdataList>());
+static const std::map<uint16_t, std::vector<RdataFields>> rdfmt = {
+	{ RT_A, { RDATA_IP } },
+	{ RT_NS, { RDATA_NAME } },
+	{ RT_MD, { RDATA_RNAME } },
+	{ RT_MF, { RDATA_RNAME } },
+	{ RT_CNAME, { RDATA_NAME } },
+	{ RT_SOA, { RDATA_NAME, RDATA_NAME, RDATA_UINT32, RDATA_UINT32, RDATA_UINT32, RDATA_UINT32, RDATA_UINT32 } },
+	{ RT_MB, { RDATA_RNAME } },
+	{ RT_MG, { RDATA_RNAME } },
+	{ RT_MR, { RDATA_RNAME } },
+	{ RT_NULL, { RDATA_DUMPHEX } },
+	{ RT_WKS, { RDATA_IP, RDATA_UINT8, RDATA_DUMPHEX } },
+	{ RT_PTR, { RDATA_NAME } },
+	{ RT_HINFO, { RDATA_STRING, RDATA_STRING } },
+	{ RT_MINFO, { RDATA_RNAME, RDATA_RNAME } },
+	{ RT_MX, { RDATA_UINT16, RDATA_NAME } },
+	{ RT_TXT, { RDATA_TXT } },
+	{ RT_RP, { RDATA_RNAME, RDATA_RNAME } },
+	{ RT_AFSDB, { RDATA_UINT16, RDATA_RNAME } },
+	{ RT_X25, { RDATA_STRING } },
+	{ RT_ISDN, { RDATA_DUMPHEX } },
+	{ RT_RT, { RDATA_UINT16, RDATA_RNAME } },
+	{ RT_AAAA, { RDATA_IPV6 } },
+	{ RT_SRV, { RDATA_UINT16, RDATA_UINT16, RDATA_UINT16, RDATA_RNAME } },
+	{ RT_OPT, { RDATA_DUMPHEX } } };
 // For all non-common types, just treat them as raw bytes.
 // Actually only types with RDATA_NAME fields must be taken special care of (since they may be compressed)
 // Those without a RDATA_NAME that are in rdfmt are only for prettier dump
-static const std::vector<RdataFields> hexdump = boost::assign::list_of(RDATA_UNKNOWN);
+static const std::vector<RdataFields> hexdump = { RDATA_UNKNOWN };
 
 static int dumpRdata(int level, const char *begin, const char *str, uint16_t rtype, int len, bool ptr)
 {

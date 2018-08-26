@@ -1,7 +1,6 @@
 #pragma once
 
-#include <boost/array.hpp>
-#include <boost/random.hpp>
+#include <random>
 #include <set>
 #include "asio.hpp"
 #include "auto_buf.hpp"
@@ -9,7 +8,7 @@
 #include "AHostsCache.hpp"
 #include "AHostsHandler.h"
 
-extern boost::mt19937 AHostsRand;
+extern std::mt19937 AHostsRand;
 
 class AHostsJob;
 class DnsClient
@@ -21,7 +20,7 @@ public:
 	virtual int response(aulddays::abuf<char> &res) = 0;
 	virtual int cancel() = 0;	// no response to client
 	// return: 0 ok, >0 timedout, <0 error
-	virtual int heartBeat(const boost::posix_time::ptime &now) = 0;
+	virtual int heartBeat(const std::chrono::steady_clock::time_point &now) = 0;
 	bool responded() const { return m_status == CLIENT_RESPONDED; }
 protected:
 	AHostsJob *m_job;
@@ -47,7 +46,7 @@ public:
 	virtual int send(aulddays::abuf<char> &req) = 0;
 	virtual int cancel() = 0;
 	// return: 0 ok, >0 timedout, <0 error
-	virtual int heartBeat(const boost::posix_time::ptime &now) = 0;
+	virtual int heartBeat(const std::chrono::steady_clock::time_point &now) = 0;
 protected:
 	AHostsJob *m_job;
 	//DnsClient *m_client;
@@ -82,7 +81,7 @@ public:
 	int clientComplete(DnsClient *client, int status = 0);
 	int serverComplete(DnsServer *server, aulddays::abuf<char> &response);
 	int request(const aulddays::abuf<char> &req);	// called by client to send request
-	int heartBeat(const boost::posix_time::ptime &now);
+	int heartBeat(const std::chrono::steady_clock::time_point &now);
 	void finished();	// dump log
 private:
 	AHosts *m_ahosts;
@@ -114,7 +113,7 @@ private:
 	abuf<char> m_reqPrint;	// Printable name:type of the request
 	int m_questionNum;	// number of question items in request
 	abuf<char> m_cached;
-	boost::posix_time::ptime m_tstart, m_tearly, m_tanswer, m_treply, m_tfin;
+	std::chrono::steady_clock::time_point m_tstart, m_tearly, m_tanswer, m_treply, m_tfin;
 };
 
 class AHosts
@@ -155,7 +154,7 @@ private:
 	aulddays::abuf<char> m_ucRecvBuf;
 
 	// timer to handle timeouts
-	asio::deadline_timer m_hbTimer;	// heartbeat timer
+	asio::steady_timer m_hbTimer;	// heartbeat timer
 	static const int HBTIMEMS = 100;	// trigger heartbeat every 0.1 sec
 };
 
@@ -168,11 +167,11 @@ public:
 	virtual int response(aulddays::abuf<char> &res);
 	void onResponsed(const asio::error_code& error, size_t size);
 	virtual int cancel();	// no response to client
-	virtual int heartBeat(const boost::posix_time::ptime &now);
+	virtual int heartBeat(const std::chrono::steady_clock::time_point &now);
 private:
 	asio::ip::udp::socket m_socket;
 	asio::ip::udp::endpoint m_remote;
-	boost::posix_time::ptime m_start;
+	std::chrono::steady_clock::time_point m_start;
 	bool m_cancel;
 };
 
@@ -182,11 +181,11 @@ public:
 	UdpServer(AHostsJob *job, asio::io_service &ioService,
 		const asio::ip::udp::endpoint &remote, unsigned int timeout)
 		: DnsServer(job, ioService, timeout), m_socket(m_ioService, asio::ip::udp::v4()),
-		m_remote(remote), m_start(boost::posix_time::min_date_time), m_cancel(false){}
+		m_remote(remote), m_start(std::chrono::steady_clock::time_point::min()), m_cancel(false){}
 	virtual ~UdpServer(){}
 	virtual int send(aulddays::abuf<char> &req);
 	virtual int cancel();
-	virtual int heartBeat(const boost::posix_time::ptime &now);
+	virtual int heartBeat(const std::chrono::steady_clock::time_point &now);
 private:
 	void onReqSent(const asio::error_code& error, size_t size);
 	void onResponse(const asio::error_code& error, size_t size);
@@ -194,6 +193,6 @@ private:
 	asio::ip::udp::endpoint m_remote;
 	aulddays::abuf<char> m_res;
 	aulddays::abuf<char> m_req;
-	boost::posix_time::ptime m_start;
+	std::chrono::steady_clock::time_point m_start;
 	bool m_cancel;
 };

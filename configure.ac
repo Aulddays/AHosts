@@ -16,13 +16,11 @@ AC_PROG_CC
 AC_PROG_LIBTOOL
 AC_PROG_RANLIB
 
-AC_SUBST([AM_CXXFLAGS], ["-std=c++0x -Wall -Wno-parentheses -Wno-unused-local-typedefs"])
+AC_SUBST([AM_CXXFLAGS], ["-std=c++11 -Wall -Wno-parentheses -Wno-unused-local-typedefs"])
 AC_SUBST([AM_CFLAGS], ["-Wall -Wno-parentheses -Wno-unused-local-typedefs"])
 AC_SUBST([AM_CPPFLAGS], [])
 
 # Checks for libraries.
-BOOST_REQUIRE
-BOOST_THREADS
 
 # Checks for header files.
 AC_CHECK_HEADERS([arpa/inet.h fcntl.h limits.h netdb.h netinet/in.h stdint.h stdlib.h string.h sys/ioctl.h sys/socket.h sys/time.h termios.h unistd.h])
