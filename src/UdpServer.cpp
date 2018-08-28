@@ -34,7 +34,7 @@ int UdpServer::send(const aulddays::abuf<char> &req)
 	}
 	if (!bindok)
 	{
-		PELOG_LOG((PLV_ERROR, "Failed to bind when sending recursive request\n"));
+		PELOG_LOG((PLV_ERROR, "Udp failed to bind when sending recursive request\n"));
 		m_status = SERVER_GOTANSWER;
 		m_res.resize(0);
 		m_job->serverComplete(this, m_res);
@@ -45,7 +45,7 @@ int UdpServer::send(const aulddays::abuf<char> &req)
 	std::uniform_int_distribution<> randid(1024, uint16_t(-1) - 1);
 	m_id = randid(AHostsRand);
 	*(uint16_t *)(char *)m_req = htons(m_id);
-	PELOG_LOG((PLV_DEBUG, "To send to server %s:%d on %d. id(%d) size(" PL_SIZET ")\n",
+	PELOG_LOG((PLV_DEBUG, "Udp to send to server %s:%d on %d. id(%d) size(" PL_SIZET ")\n",
 		m_remote.address().to_string().c_str(), (int)m_remote.port(), (int)m_socket.local_endpoint().port(), m_id, req.size()));
 	m_status = SERVER_SENDING;
 	m_socket.async_send_to(asio::buffer(m_req, m_req.size()), m_remote,
@@ -58,14 +58,14 @@ void UdpServer::onReqSent(const asio::error_code& error, size_t size)
 	if (error)
 	{
 		if (!m_cancel)
-			PELOG_LOG((PLV_ERROR, "Send request to server failed. %s\n", error.message().c_str()));
+			PELOG_LOG((PLV_ERROR, "Udp send request to server failed. %s\n", error.message().c_str()));
 		m_status = SERVER_GOTANSWER;
 		m_res.resize(0);
 		m_job->serverComplete(this, m_res);
 		return;
 	}
 	m_res.resize(0);
-	PELOG_LOG((PLV_DEBUG, "Request sent (" PL_SIZET "), waiting server response\n", size));
+	PELOG_LOG((PLV_DEBUG, "Udp request sent (" PL_SIZET "), waiting server response\n", size));
 	m_status = SERVER_WAITING;
 	// since we do not know the response size yet, we just peek with empty buffer at first to get the size
 	m_socket.async_receive_from(asio::buffer(m_res, 0), m_remote, MSG_PEEK,
@@ -82,7 +82,7 @@ void UdpServer::onResponse(const asio::error_code& error, size_t size)
 		)
 	{
 		m_res.resize(m_socket.available());
-		PELOG_LOG((PLV_DEBUG, "Response size from server " PL_SIZET "\n", m_res.size()));
+		PELOG_LOG((PLV_DEBUG, "Udp response size from server " PL_SIZET "\n", m_res.size()));
 		m_socket.async_receive_from(asio::buffer(m_res, m_res.size()), m_remote,
 			std::bind(&UdpServer::onResponse, this, std::placeholders::_1 /*error*/, std::placeholders::_2 /*bytes_transferred*/));
 		return;
@@ -92,19 +92,19 @@ void UdpServer::onResponse(const asio::error_code& error, size_t size)
 		if (!m_cancel)
 		{
 			if (m_res.size() == 0)	// The peek was performed
-				PELOG_LOG((PLV_ERROR, "Recv response from server failed. %d:%s\n", error.value(), error.message().c_str()));
+				PELOG_LOG((PLV_ERROR, "Udp recv response from server failed. %d:%s\n", error.value(), error.message().c_str()));
 		}
 		m_res.resize(0);
 	}
 	else if (m_id != ntohs(*(const uint16_t *)(const char *)m_res))
 	{
-		PELOG_LOG((PLV_ERROR, "Invalid ID from server. expect %d got %d size(" PL_SIZET ")\n",
+		PELOG_LOG((PLV_ERROR, "Udp invalid ID from server. expect %d got %d size(" PL_SIZET ")\n",
 			(int)m_id, (int)ntohs(*(const uint16_t *)(const char *)m_res), size));
 		m_res.resize(0);
 	}
 	else
 	{
-		PELOG_LOG((PLV_DEBUG, "Response from server got id(%d), size(" PL_SIZET ")\n", (int)m_id, size));
+		PELOG_LOG((PLV_DEBUG, "Udp response from server got id(%d), size(" PL_SIZET ")\n", (int)m_id, size));
 		m_res.resize(size);
 	}
 	m_status = SERVER_GOTANSWER;
@@ -113,7 +113,7 @@ void UdpServer::onResponse(const asio::error_code& error, size_t size)
 
 int UdpServer::cancel()
 {
-	PELOG_LOG((PLV_VERBOSE, "Server cenceling.\n"));
+	PELOG_LOG((PLV_VERBOSE, "Udp server cenceling.\n"));
 	m_cancel = true;
 	if (m_status < SERVER_SENDING)
 	{
@@ -135,7 +135,7 @@ int UdpServer::heartBeat(const std::chrono::steady_clock::time_point &now)
 		int64_t passed = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_start).count();
 		if (passed > m_timeout || passed < (0 - (signed int)m_timeout))
 		{
-			PELOG_LOG((PLV_INFO, "Server timed-out %d:%d.\n", int(passed), (int)m_timeout));
+			PELOG_LOG((PLV_INFO, "Udp server timed-out %d:%d.\n", int(passed), (int)m_timeout));
 			cancel();
 			ret = 1;
 		}

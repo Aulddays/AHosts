@@ -48,6 +48,8 @@ int AHostsConf::load(const char *conffile)
 	// servers
 	parseServers(&config, "ServersUdp", m_uservers);
 	parseServers(&config, "ServersTcp", m_tservers);
+	parseServers(&config, "BackServersUdp", m_userversback);
+	parseServers(&config, "BackServersTcp", m_tserversback);
 	if (m_uservers.empty() && m_tservers.empty())
 		PELOG_ERROR_RETURN((PLV_ERROR, "No valid servers found\n"), -1);
 
@@ -56,6 +58,8 @@ int AHostsConf::load(const char *conffile)
 
 	m_timeout = config_get_int(&config, "Timeout", 20000);
 	PELOG_LOG((PLV_INFO, "Timeout: %u\n", m_timeout));
+	m_backTimeout = config_get_int(&config, "BackTimeout", m_timeout);
+	PELOG_LOG((PLV_INFO, "BackTimeout: %u\n", m_backTimeout));
 
 	m_earlyTimeout = config_get_int(&config, "EarlyTimeout", 1500);
 	PELOG_LOG((PLV_INFO, "EarlyTimeout: %u\n", m_earlyTimeout));

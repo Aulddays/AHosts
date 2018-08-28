@@ -114,6 +114,10 @@ AHostsJob::AHostsJob(AHosts *ahosts, asio::io_service &ioService)
 {
 	//m_server = new UdpServer(this, m_ioService);
 	m_tstart = m_tearly = m_tanswer = m_treply = m_tfin = std::chrono::steady_clock::now();
+	// If back-server is not configured, set m_backserversent = true, so no need to try 
+	m_backserversent = !(m_ahosts->getConf().m_backTimeout > 0 &&
+		m_ahosts->getConf().m_backTimeout < m_ahosts->getConf().m_timeout &&
+		(m_ahosts->getConf().m_userversback.size() || m_ahosts->getConf().m_tserversback.size()));
 	//m_server->setClient(m_client);
 }
 
@@ -196,14 +200,14 @@ int AHostsJob::request(const aulddays::abuf<char> &req)
 	{
 		UdpServer *server = new UdpServer(this, m_ioService, *i, m_ahosts->getConf().m_timeout);
 		m_server.insert(server);
+		server->send(m_request);
 	}
 	for (auto i = m_ahosts->getConf().m_tservers.begin(); i != m_ahosts->getConf().m_tservers.end(); ++i)
 	{
 		TcpServer *server = new TcpServer(this, m_ioService, *i, m_ahosts->getConf().m_timeout);
 		m_server.insert(server);
-	}
-	for (DnsServer *server : m_server)
 		server->send(m_request);
+	}
 	return 0;
 }
 
@@ -280,6 +284,8 @@ int AHostsJob::serverComplete(DnsServer *server, aulddays::abuf<char> &response)
 					PELOG_LOG((PLV_DEBUG, "checkAnswer OK.\n"));
 				}
 			}
+			if (!valid && m_server.size() == 0 && !m_backserversent)
+				sendBackservers();
 			if (valid || m_server.size() == 0)	// valid answer or invalid and no servers pending
 			{
 				//PELOG_LOG((PLV_DEBUG, "Dump response(" PL_SIZET "):\n", response.size()));
@@ -325,11 +331,16 @@ int AHostsJob::serverComplete(DnsServer *server, aulddays::abuf<char> &response)
 		}
 		else if (m_server.size() == 0)	// all server finished and no answer
 		{
-			//m_tanswer = std::chrono::steady_clock::now();
-			int oldstatus = m_status;
-			m_status = JOB_GOTANSWER;
-			if (oldstatus != JOB_EARLYRET)
-				m_client->cancel();
+			if (!m_backserversent)
+				sendBackservers();
+			if (m_server.size() == 0)
+			{
+				//m_tanswer = std::chrono::steady_clock::now();
+				int oldstatus = m_status;
+				m_status = JOB_GOTANSWER;
+				if (oldstatus != JOB_EARLYRET)
+					m_client->cancel();
+			}
 		}
 	}
 	if (m_status == JOB_GOTANSWER && m_client->responded())	// client early returned
@@ -344,9 +355,11 @@ int AHostsJob::serverComplete(DnsServer *server, aulddays::abuf<char> &response)
 int AHostsJob::heartBeat(const std::chrono::steady_clock::time_point &now)
 {
 	int ret = 0;
+	int64_t passed = -1;
 	if (m_status == JOB_REQUESTING)
 	{
-		int64_t passed = (std::chrono::duration_cast<std::chrono::milliseconds>(now - m_tstart)).count();
+		if (passed < 0)
+			passed = (std::chrono::duration_cast<std::chrono::milliseconds>(now - m_tstart)).count();
 		int earlyTimeout = (int)m_ahosts->getConf().m_earlyTimeout;
 		if (earlyTimeout > 0 && (passed > earlyTimeout || passed < (0 - earlyTimeout)))
 		{
@@ -366,6 +379,15 @@ int AHostsJob::heartBeat(const std::chrono::steady_clock::time_point &now)
 			else
 				m_status = JOB_NOEARLYRET;
 		}
+	}
+	if (!m_backserversent && m_status >= JOB_REQUESTING && m_status < JOB_GOTANSWER)
+	{
+		// check whether back-servers are necessary
+		if (passed < 0)
+			passed = (std::chrono::duration_cast<std::chrono::milliseconds>(now - m_tstart)).count();
+		int backTimeout = (int)m_ahosts->getConf().m_backTimeout;
+		if (backTimeout > 0 && passed > backTimeout && passed < m_ahosts->getConf().m_timeout)
+			sendBackservers();
 	}
 	for (auto i = m_server.begin(); i != m_server.end(); ++i)
 	{
@@ -397,6 +419,26 @@ void AHostsJob::finished()
 		(int)std::chrono::duration_cast<std::chrono::milliseconds>(m_tanswer - m_tstart).count(),
 		(int)std::chrono::duration_cast<std::chrono::milliseconds>(m_treply - m_tstart).count(),
 		(int)std::chrono::duration_cast<std::chrono::milliseconds>(m_tfin - m_tstart).count()));
+}
+
+int AHostsJob::sendBackservers()
+{
+	if (m_backserversent)
+		return -1;
+	m_backserversent = true;
+	for (const auto &i : m_ahosts->getConf().m_userversback)
+	{
+		UdpServer *server = new UdpServer(this, m_ioService, i, m_ahosts->getConf().m_timeout);
+		m_server.insert(server);
+		server->send(m_request);
+	}
+	for (const auto &i : m_ahosts->getConf().m_tserversback)
+	{
+		TcpServer *server = new TcpServer(this, m_ioService, i, m_ahosts->getConf().m_timeout);
+		m_server.insert(server);
+		server->send(m_request);
+	}
+	return 0;
 }
 
 // UdpClient

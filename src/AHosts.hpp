@@ -89,6 +89,8 @@ private:
 	DnsClient *m_client;
 	std::set<DnsServer *> m_server;	// running servers
 	std::vector<DnsServer *> m_finished;	// completed servers move from m_server to here
+	bool m_backserversent;	// whether the request has been sent to back-servers 
+	int sendBackservers();
 	aulddays::abuf<char> m_request;
 	AHostsHandler m_handler;
 	enum

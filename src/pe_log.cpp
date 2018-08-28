@@ -337,6 +337,7 @@ int pelog_setfile_rotate(size_t filesize_kb, size_t maxkeep, const char *fileNam
 		if (filesize_kb != (size_t)-1)
 			PELOG_LOG((PLV_INFO, "Log rotate size %llu KB, history num %llu\n",
 				(unsigned long long)filesize_kb, (unsigned long long)maxkeep));
+		fflush(pelog_out_stream.get());
 	}
 	return pelog_out_stream.setrot(filesize_kb * 1024, maxkeep, fileName, linebuf);
 }

@@ -25,7 +25,7 @@ int TcpServer::send(const aulddays::abuf<char> &req)
 	m_id = randid(AHostsRand);
 	*(uint16_t *)(m_req.buf() + 2) = htons(m_id);
 	// connect to server
-	PELOG_LOG((PLV_DEBUG, "To connect to server %s:%d. id(%d) size(" PL_SIZET ")\n",
+	PELOG_LOG((PLV_DEBUG, "Tcp to connect to server %s:%d. id(%d) size(" PL_SIZET ")\n",
 		m_remote.address().to_string().c_str(), (int)m_remote.port(), m_id, req.size()));
 	m_status = SERVER_SENDING;
 	m_socket.async_connect(m_remote,
@@ -78,7 +78,7 @@ void TcpServer::onResponse(const asio::error_code& error, size_t size, size_t ol
 	if (error)
 	{
 		if (!m_cancel)
-			PELOG_LOG((PLV_ERROR, "Recv response from server failed. %d:%s\n", error.value(), error.message().c_str()));
+			PELOG_LOG((PLV_ERROR, "Tcp recv response from server failed. %d:%s\n", error.value(), error.message().c_str()));
 		m_res.resize(0);
 		m_status = SERVER_GOTANSWER;
 		m_socket.close();
@@ -121,13 +121,13 @@ void TcpServer::onResponse(const asio::error_code& error, size_t size, size_t ol
 	m_res.resize(m_res.size() - 2);
 	if (m_id != ntohs(*(const uint16_t *)(const char *)m_res))
 	{
-		PELOG_LOG((PLV_ERROR, "Invalid ID from server. expect %d got %d size(" PL_SIZET ")\n",
+		PELOG_LOG((PLV_ERROR, "Tcp invalid ID from server. expect %d got %d size(" PL_SIZET ")\n",
 			(int)m_id, (int)ntohs(*(const uint16_t *)(const char *)m_res), m_res.size()));
 		m_res.resize(0);
 	}
 	else
 	{
-		PELOG_LOG((PLV_DEBUG, "Response from server got id(%d), size(" PL_SIZET ")\n", (int)m_id, size));
+		PELOG_LOG((PLV_DEBUG, "Tcp response from server got id(%d), size(" PL_SIZET ")\n", (int)m_id, size));
 	}
 	m_status = SERVER_GOTANSWER;
 	m_job->serverComplete(this, m_res);
