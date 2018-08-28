@@ -91,7 +91,17 @@ void TcpServer::onResponse(const asio::error_code& error, size_t size, size_t ol
 			asio::buffer(m_res + size + oldsize, m_res.size() - size - oldsize),
 			asio::transfer_at_least(1),
 			std::bind(&TcpServer::onResponse, this,
-			std::placeholders::_1 /*error*/, std::placeholders::_2 /*bytes_transferred*/, size + oldsize));
+				std::placeholders::_1 /*error*/, std::placeholders::_2 /*bytes_transferred*/, size + oldsize));
+		return;
+	}
+	if (size + oldsize < 2)	// size == 0 implied
+	{
+		if (!m_cancel)
+			PELOG_LOG((PLV_ERROR, "Tcp received incomplete response. %d\n", (int)oldsize));
+		m_res.resize(0);
+		m_status = SERVER_GOTANSWER;
+		m_socket.close();
+		m_job->serverComplete(this, m_res);
 		return;
 	}
 	uint16_t reslen = ntohs(*(uint16_t *)(char *)m_res);

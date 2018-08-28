@@ -90,12 +90,11 @@ void UdpServer::onResponse(const asio::error_code& error, size_t size)
 	if (error)
 	{
 		if (!m_cancel)
-		{
-			if (m_res.size() == 0)	// The peek was performed
-				PELOG_LOG((PLV_ERROR, "Udp recv response from server failed. %d:%s\n", error.value(), error.message().c_str()));
-		}
+			PELOG_LOG((PLV_ERROR, "Udp recv response from server failed. %d:%s\n", error.value(), error.message().c_str()));
 		m_res.resize(0);
 	}
+	else if (m_cancel)	// canceled, even if no network error
+		m_res.resize(0);
 	else if (m_id != ntohs(*(const uint16_t *)(const char *)m_res))
 	{
 		PELOG_LOG((PLV_ERROR, "Udp invalid ID from server. expect %d got %d size(" PL_SIZET ")\n",
@@ -108,6 +107,7 @@ void UdpServer::onResponse(const asio::error_code& error, size_t size)
 		m_res.resize(size);
 	}
 	m_status = SERVER_GOTANSWER;
+	m_socket.close();
 	m_job->serverComplete(this, m_res);
 }
 
